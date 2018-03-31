@@ -8,6 +8,7 @@
 
 import os
 import os.path as osp
+import time
 
 import pandas as pd
 import cv2
@@ -16,6 +17,7 @@ import random
 import numpy as np
 from sklearn.metrics import average_precision_score, precision_recall_curve
 import pickle
+import matplotlib.pyplot as plt
 
 
 def _compute_iou(a, b):
@@ -258,6 +260,9 @@ class PersonSearchDataset:
         precision, recall, __ = precision_recall_curve(y_true, y_score)
         recall *= det_rate
 
+        plt.plot(recall, precision)
+        plt.savefig('pr.jpg')
+
         print(
             '{} detection:'.format('labeled only' if labeled_only else 'all'))
         print('  recall = {:.2%}'.format(det_rate))
@@ -299,18 +304,21 @@ class PersonSearchDataset:
             # Get L2-normalized feature vector
             feat_p = probe_feat[i].ravel()
             # Ignore the probe image
+            start = time.time()
             probe_imname = self.queries_to_galleries.iloc[i, 0]
-            probe_roi = df[df['imname'] == probe_imname]
-            probe_roi = probe_roi[probe_roi['is_query'] == 1]
-            probe_roi = probe_roi[probe_roi['pid'] == i]
-            probe_roi = probe_roi.loc[:, 'x1': 'y2'].as_matrix()
+            # probe_roi = df[df['imname'] == probe_imname]
+            # probe_roi = probe_roi[probe_roi['is_query'] == 1]
+            # probe_roi = probe_roi[probe_roi['pid'] == pid]
+            # probe_roi = probe_roi.loc[:, 'x1': 'y2'].as_matrix()
             probe_gt = []
             tested = set([probe_imname])
             # 1. Go through the gallery samples defined by the protocol
             for g_i in range(1, gallery_size + 1):
                 gallery_imname = self.queries_to_galleries.iloc[i, g_i]
-                gt = df[df['imname'] == gallery_imname]
-                gt = gt[gt['pid'] == pid]  # important
+                # gt = df[df['imname'] == gallery_imname]
+                # gt = gt[gt['pid'] == pid]  # important
+                # gt = gt.loc[:, 'x1': 'y2']
+                gt = df.query('imname==@gallery_imname and pid==@pid')
                 gt = gt.loc[:, 'x1': 'y2'].as_matrix().ravel()
                 count_gt += (gt.size > 0)
                 # compute distance between probe and gallery dets
@@ -360,6 +368,9 @@ class PersonSearchDataset:
             y_score = y_score[inds]
             y_true = y_true[inds]
             accs.append([min(1, sum(y_true[:k])) for k in topk])
+            # compute time cost
+            end = time.time()
+            print('{}-th loop, cost {:.4f}s'.format(i, end - start))
 
         print('search ranking:')
         print('  mAP = {:.2%}'.format(np.mean(aps)))
