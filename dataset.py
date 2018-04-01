@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 28, 2018
-# Latest rectifying: Mar 28, 2018
+# Latest rectifying: Mar 31, 2018
 # -----------------------------------------------------
 
 import os
@@ -83,6 +83,9 @@ class PersonSearchDataset:
 
         else:
             raise KeyError(self.split)
+
+        self.num_train_images = self.train_imnames.shape[0]
+        self.num_test_images = self.test_imnames.shape[0]
 
     def delta_to_coordinates(self):
         """change `del_x` and `del_y` to `x2` and `y2` for testing set"""
@@ -206,6 +209,14 @@ class PersonSearchDataset:
 
     def test_image_path(self, i):
         return osp.join(self.images_dir, self.test_imnames.iloc[i])
+
+    def __len__(self):
+        if self.split == 'train':
+            return self.num_train_images * 2
+        elif self.split == 'test':
+            return self.num_test_images
+        else:
+            raise KeyError(self.split)
 
     def evaluate_detections(self, gallery_det, det_thresh=0.5, iou_thresh=0.5,
                             labeled_only=False):
