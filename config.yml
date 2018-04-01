@@ -1,0 +1,7 @@
+gamma: 0.1
+disp_interval: 20
+
+fixed_blocks: 1
+rpn_channels: 512
+anchor_scales: (8, 16, 32)
+anchor_ratios: (0.5, 1, 2)
