@@ -1,3 +1,10 @@
+# -----------------------------------------------------
+# Train Spatial Invariant Person Search Network
+#
+# Author: Liangqi Li
+# Creating Date: Mar 31, 2018
+# Latest rectified: Apr 2, 2018
+# -----------------------------------------------------
 import os
 import sys
 import argparse
@@ -11,7 +18,6 @@ import time
 
 from dataset import PersonSearchDataset
 from model import SIPN
-from oim import oim
 
 
 def parse_args():
