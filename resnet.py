@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectifying: Apr 1, 2018
+# Latest rectifying: Apr 2, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -211,7 +211,6 @@ class resnet:
     def __init__(self, num_layers=50, state_dict=None, training=True):
         self.net_conv_channels = 1024
         self.fc7_channels = 2048
-        self.reid_feat_dim = 256
         self.training = True
 
         if num_layers == 50:
@@ -225,26 +224,9 @@ class resnet:
 
         with open('config.yml', 'r') as f:
             config = yaml.load(f)
-        self.fixed_blocks = config['fixed_blocks']
-        self.rpn_channels = config['rpn_channels']
-        self.anchor_scales = config['anchor_scales']
-        self.anchor_ratios = config['anchor_ratios']
-        self.num_anchors = len(self.anchor_scales) * \
-                           len(self.anchor_ratios)
+        self.fixed_blocks = config['res50_fixed_blocks']
 
         self.head, self.tail = self.initialize(self.fixed_blocks)
-        self.rpn_net = nn.Conv2d(
-            self.net_conv_channels, self.rpn_channels, 3, padding=1)
-        self.rpn_cls_score_net = nn.Conv2d(
-            self.rpn_channels, self.num_anchors * 2, 1)
-        self.rpn_bbox_pred_net = nn.Conv2d(
-            self.rpn_channels, self.num_anchors * 4, 1)
-        self.cls_score_net = nn.Linear(self.fc7_channels, 2)
-        self.bbox_pred_net = nn.Linear(self.fc7_channels, 8)
-        self.reid_feat_net = nn.Linear(self.fc7_channels,
-                                       self.reid_feat_dim)
-
-        self.init_linear_weight(True)
 
     def initialize(self, fixed_blocks):
         for p in self.model.bn1.parameters():
@@ -284,26 +266,26 @@ class resnet:
 
         return head, tail
 
-    def init_linear_weight(self, trun):
-        def normal_init(m, mean, stddev, truncated=False):
-            """
-            weight initalizer: truncated normal and random normal.
-            """
-            # x is a parameter
-            if truncated:
-                m.weight.data.normal_().fmod_(2).mul_(stddev).add_(
-                    mean)  # not a perfect approximation
-            else:
-                m.weight.data.normal_(mean, stddev)
-            m.bias.data.zero_()
+    def train(self, mode):
+        if mode:
+            # Set fixed blocks to be in eval mode (not really doing anything)
+            self.model.eval()
+            if self.fixed_blocks <= 3:
+                self.model.layer4.train()
+            if self.fixed_blocks <= 2:
+                self.model.layer3.train()
+            if self.fixed_blocks <= 1:
+                self.model.layer2.train()
+            if self.fixed_blocks == 0:
+                self.model.layer1.train()
 
-        normal_init(self.rpn_net, 0, 0.01, trun)
-        normal_init(self.rpn_cls_score_net, 0, 0.01, trun)
-        normal_init(self.rpn_bbox_pred_net, 0, 0.01, trun)
-        normal_init(self.cls_score_net, 0, 0.01, trun)
-        normal_init(self.bbox_pred_net, 0, 0.001, trun)
-        # TODO: change 0.01 for reid_feat_net
-        normal_init(self.reid_feat_net, 0, 0.01, trun)
+            # Set batchnorm always in eval mode during training
+            def set_bn_eval(m):
+                classname = m.__class__.__name__
+                if classname.find('BatchNorm') != -1:
+                    m.eval()
+
+            self.model.apply(set_bn_eval)
 
 
 
