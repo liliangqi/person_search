@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectifying: Apr 1, 2018
+# Latest rectifying: Apr 2, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -11,6 +11,8 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 
 from resnet import resnet
+from strpn import STRPN
+from losses import oim_loss, smooth_l1_loss
 
 
 class SIPN(nn.Module):
@@ -19,70 +21,74 @@ class SIPN(nn.Module):
         super().__init__()
         self.net_name = net_name
         self.training = training
+        # TODO: set depending on dataset
+        self.num_pid = 5532
+        self.queue_size = 5000
+        self.lut_momentum = 0.5
+        self.reid_feat_dim = 256
+
+        self.register_buffer('lut', torch.zeros(
+            self.num_pid, self.reid_feat_dim).cuda())
+        self.register_buffer('queue', torch.zeros(
+            self.queue_size, self.reid_feat_dim).cuda())
 
         if self.net_name == 'res50':
             self.net = resnet(50, state_dict, self.training)
         else:
             raise KeyError(self.net_name)
 
+        self.fc7_channels = self.net.fc7_channels
+
+        # SPIN consists of three main parts
         self.head = self.net.head
+        self.strpn = STRPN(self.net.net_conv_channels)
         self.tail = self.net.tail
-        self.rpn_net = self.net.rpn_net
-        self.rpn_cls_score_net = self.net.rpn_cls_score_net
-        self.rpn_bbox_pred_net = self.net.rpn_bbox_pred_net
+
+        self.cls_score_net = nn.Linear(self.fc7_channels, 2)
+        self.bbox_pred_net = nn.Linear(self.fc7_channels, 8)
+        self.reid_feat_net = nn.Linear(self.fc7_channels, self.reid_feat_dim)
+        self.init_linear_weight(True)
 
     def forward(self, im_data, gt_boxes, im_info):
         net_conv = self.head(im_data)
-        rois = self.region_proposal(net_conv, im_info)
+        # returned parameters contain 3 tuples here
+        pooled_feat, rpn_loss, label, bbox_info = self.strpn(net_conv, im_info)
+        fc7 = self.tail(pooled_feat)
+        cls_score = self.cls_score_net(fc7)
+        bbox_pred = self.bbox_pred_net(fc7)
+        reid_feat = F.normalize(self.reid_feat_net(fc7))
 
-    def region_proposal(self, net_conv, im_info):
-        rpn = F.relu(self.rpn_net(net_conv))
-        rpn_cls_score = self.rpn_cls_score_net(rpn)
-        rpn_cls_score_reshape = rpn_cls_score.view(
-            1, 2, -1, rpn_cls_score.size()[-1])
-        rpn_cls_prob_reshape = F.softmax(rpn_cls_score_reshape)
-        rpn_cls_prob = rpn_cls_prob_reshape.view_as(rpn_cls_score).permute(
-            0, 2, 3, 1)
-        rpn_cls_score = rpn_cls_score.permute(0, 2, 3, 1)
-        rpn_cls_score_reshape = rpn_cls_score_reshape.permute(
-            0, 2, 3, 1).contiguous()
-        rpn_cls_pred = torch.max(rpn_cls_score_reshape.view(-1, 2), 1)[1]
-        rpn_bbox_pred = self.rpn_bbox_pred_net(rpn)
-        rpn_bbox_pred = rpn_bbox_pred.permute(0, 2, 3, 1).contiguous()
+        cls_pred = torch.max(cls_score, 1)[1]
+        cls_prob = F.softmax(cls_score)
+        det_label, pid_label = label
 
-        if self.training:
-            rois, roi_scores = self.proposal_layer(rpn_cls_prob, rpn_bbox_pred,
-                                                   im_info)
-            rpn_labels = self.anchor_target_layer(rpn_cls_score)
-            rois, _ = self.proposal_target_layer(rois, roi_scores)
-        else:
-            rois, _ = self.proposal_layer(rpn_cls_prob, rpn_bbox_pred)
+        cls_loss = F.cross_entropy(cls_score.view(-1, 2), det_label)
+        bbox_loss = smooth_l1_loss(bbox_pred, bbox_info)
+        reid_loss = oim_loss(reid_feat, pid_label, self.num_pid,
+                             self.queue_size, self.lut,
+                             self.queue, self.lut_momentum)
+        rpn_cls_loss, rpn_box_loss = rpn_loss
 
-        return rois
-
-    def proposal_layer(self, rpn_cls_prob, rpn_bbox_pred, im_info):
-
-        return 1, 2
-
+        return rpn_cls_loss, rpn_box_loss, cls_loss, bbox_loss, reid_loss
 
     def train(self, mode=True):
         nn.Module.train(self, mode)
-        if mode:
-            # Set fixed blocks to be in eval mode (not really doing anything)
-            self.net.model.eval()
-            if self.net.fixed_blocks <= 3:
-                self.net.model.layer4.train()
-            if self.net.fixed_blocks <= 2:
-                self.net.model.layer3.train()
-            if self.net.fixed_blocks <= 1:
-                self.net.model.layer2.train()
-            if self.net.fixed_blocks == 0:
-                self.net.model.layer1.train()
+        self.net.train(mode)
 
-            # Set batchnorm always in eval mode during training
-            def set_bn_eval(m):
-                classname = m.__class__.__name__
-                if classname.find('BatchNorm') != -1:
-                    m.eval()
+    def init_linear_weight(self, trun):
+        def normal_init(m, mean, stddev, truncated=False):
+            """
+            weight initalizer: truncated normal and random normal.
+            """
+            # x is a parameter
+            if truncated:
+                m.weight.data.normal_().fmod_(2).mul_(stddev).add_(
+                    mean)  # not a perfect approximation
+            else:
+                m.weight.data.normal_(mean, stddev)
+            m.bias.data.zero_()
 
-            self.net.model.apply(set_bn_eval)
+        normal_init(self.cls_score_net, 0, 0.01, trun)
+        normal_init(self.bbox_pred_net, 0, 0.001, trun)
+        # TODO: change 0.01 for reid_feat_net
+        normal_init(self.reid_feat_net, 0, 0.01, trun)
