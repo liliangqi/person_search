@@ -5,3 +5,29 @@ res50_fixed_blocks: 1
 rpn_channels: 512
 anchor_scales: (8, 16, 32)
 anchor_ratios: (0.5, 1, 2)
+rpn_feat_stride: [16]
+
+train_rpn_pre_nms_top_n: 12000
+train_rpn_post_nms_top_n: 2000
+train_rpn_nms_thresh: 0.7
+train_rpn_batchsize: 256
+train_rpn_fg_frac: 0.5
+train_rpn_pos_overlap: 0.7
+train_rpn_neg_overlap: 0.3
+train_rpn_clobber_positive: False
+train_rpn_bbox_inside_weights: [1.0, 1.0, 1.0, 1.0]
+train_rpn_pos_weight: -1.0
+
+train_batch_size: 128
+train_fg_frac: 0.25
+train_fg_thresh: 0.5
+train_bg_thresh_hi: 0.5
+train_bg_thresh_lo: 0.0
+train_bbox_normalize_targets_precomputed: True
+train_bbox_normalize_means: [0.0, 0.0, 0.0, 0.0]
+train_bbox_normalize_stds: [0.1, 0.1, 0.2, 0.2]
+train_bbox_inside_weights: [1.0, 1.0, 1.0, 1.0]
+
+test_rpn_pre_nms_top_n: 6000
+test_rpn_post_nms_top_n: 300
+test_rpn_nms_thresh: 0.7
