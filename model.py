@@ -1,9 +1,9 @@
 # -----------------------------------------------------
-# Person Search Model
+# Spatial Invariant Person Search Network
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectifying: Apr 2, 2018
+# Latest rectified: Apr 2, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -41,7 +41,8 @@ class SIPN(nn.Module):
 
         # SPIN consists of three main parts
         self.head = self.net.head
-        self.strpn = STRPN(self.net.net_conv_channels)
+        self.strpn = STRPN(self.net.net_conv_channels, self.num_pid,
+                           self.training)
         self.tail = self.net.tail
 
         self.cls_score_net = nn.Linear(self.fc7_channels, 2)
@@ -52,7 +53,8 @@ class SIPN(nn.Module):
     def forward(self, im_data, gt_boxes, im_info):
         net_conv = self.head(im_data)
         # returned parameters contain 3 tuples here
-        pooled_feat, rpn_loss, label, bbox_info = self.strpn(net_conv, im_info)
+        pooled_feat, rpn_loss, label, bbox_info = self.strpn(
+            net_conv, gt_boxes, im_info)
         fc7 = self.tail(pooled_feat)
         cls_score = self.cls_score_net(fc7)
         bbox_pred = self.bbox_pred_net(fc7)
