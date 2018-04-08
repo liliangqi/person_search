@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectified: Apr 2, 2018
+# Latest rectified: Apr 8, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -17,7 +17,7 @@ from losses import oim_loss, smooth_l1_loss
 
 class SIPN(nn.Module):
 
-    def __init__(self, net_name, state_dict=None, training=True):
+    def __init__(self, net_name, pre_model=None, training=True):
         super().__init__()
         self.net_name = net_name
         self.training = training
@@ -33,7 +33,7 @@ class SIPN(nn.Module):
             self.queue_size, self.reid_feat_dim).cuda())
 
         if self.net_name == 'res50':
-            self.net = resnet(50, state_dict, self.training)
+            self.net = resnet(50, pre_model, self.training)
         else:
             raise KeyError(self.net_name)
 
