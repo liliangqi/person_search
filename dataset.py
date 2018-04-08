@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 28, 2018
-# Latest rectifying: Mar 31, 2018
+# Latest rectifying: Apr 8, 2018
 # -----------------------------------------------------
 
 import os
@@ -69,6 +69,7 @@ class PersonSearchDataset:
             self.train_imnames_list = list(range(self.train_imnames.shape[0]))
             random.shuffle(self.train_imnames_list)  # shuffle the list
             self.train_imnames_list_equip = self.train_imnames_list[:]
+            self.num_train_images = self.train_imnames.shape[0]
 
         elif self.split == 'test':
             self.test_imnames = pd.read_csv(
@@ -80,12 +81,10 @@ class PersonSearchDataset:
             self.queries_to_galleries = pd.read_csv(
                 osp.join(self.annotation_dir, q_to_g_file))
             self.delta_to_coordinates()
+            self.num_test_images = self.test_imnames.shape[0]
 
         else:
             raise KeyError(self.split)
-
-        self.num_train_images = self.train_imnames.shape[0]
-        self.num_test_images = self.test_imnames.shape[0]
 
     def delta_to_coordinates(self):
         """change `del_x` and `del_y` to `x2` and `y2` for testing set"""
