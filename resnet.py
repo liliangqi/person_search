@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectified: Apr 8, 2018
+# Latest rectifying: Apr 8, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -207,19 +207,22 @@ def resnet152(pretrained=False):
 
 class resnet:
 
-    def __init__(self, num_layers=50, state_dict=None, training=True):
+    def __init__(self, num_layers=50, pre_model=None, training=True):
         self.net_conv_channels = 1024
         self.fc7_channels = 2048
-        self.training = True
+        self.training = training
 
         if num_layers == 50:
-            self.model = resnet50()
+            if pre_model:
+                self.model = resnet50()
+                state_dict = torch.load(pre_model)
+                # TODO: distinguish training and testing
+                self.model.load_state_dict(
+                    {k: state_dict[k] for k in list(self.model.state_dict())})
+            else:
+                self.model = resnet50(True)
         else:
             raise KeyError(num_layers)
-
-        # TODO: distinguish training and testing
-        self.model.load_state_dict(
-            {k: state_dict[k] for k in list(self.model.state_dict())})
 
         with open('config.yml', 'r') as f:
             config = yaml.load(f)
