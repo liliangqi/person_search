@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 31, 2018
-# Latest rectified: Apr 2, 2018
+# Latest rectified: Apr 8, 2018
 # -----------------------------------------------------
 import os
 import sys
@@ -68,7 +68,11 @@ def main():
     opt = parse_args()
     use_cuda = cuda_mode(opt)
     network = SIPN(opt.net, opt.pre_model)
+
     save_dir = opt.out_dir
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
     lr = opt.lr
     with open('config.yml', 'r') as f:
         config = yaml.load(f)
@@ -88,7 +92,7 @@ def main():
     # TODO: add resume
     all_epoch_loss = 0
 
-    for epoch in opt.epochs:
+    for epoch in range(opt.epochs):
         network.train()
         epoch_start = time.time()
         start = epoch_start
@@ -141,6 +145,9 @@ def main():
 
 
 
+if __name__ == '__main__':
+
+    main()
 
 
 
