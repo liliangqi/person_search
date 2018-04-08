@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectifying: Apr 2, 2018
+# Latest rectified: Apr 8, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -12,7 +12,6 @@ from torch.autograd import Variable
 import math
 import torch.utils.model_zoo as model_zoo
 
-from model import SIPN
 import yaml
 
 
