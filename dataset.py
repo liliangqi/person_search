@@ -167,12 +167,12 @@ class PersonSearchDataset:
             max_size = 1000
             pixel_means = np.array([[[102.9801, 115.9465, 122.7717]]])
 
-            # prepare for the next epoch
-            if len(self.train_imnames_list) == 0:
-                assert self.train_imnames.shape[0] == 0
-                self.train_imnames_list = self.train_imnames_list_equip[:]
-                self.train_imnames = pd.read_csv(
-                    osp.join(self.cache_dir, self.train_imnamesDF_file))
+            # # prepare for the next epoch
+            # if len(self.train_imnames_list) == 0:
+            #     assert self.train_imnames.shape[0] == 0
+            #     self.train_imnames_list = self.train_imnames_list_equip[:]
+            #     self.train_imnames = pd.read_csv(
+            #         osp.join(self.cache_dir, self.train_imnamesDF_file))
 
             choosen = self.train_imnames_list.pop()
             im_name, flipped = self.train_imnames.loc[choosen]
@@ -211,7 +211,7 @@ class PersonSearchDataset:
 
     def __len__(self):
         if self.split == 'train':
-            return self.num_train_images * 2
+            return self.num_train_images
         elif self.split == 'test':
             return self.num_test_images
         else:
