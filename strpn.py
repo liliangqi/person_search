@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 2, 2018
-# Latest rectified: Apr 4, 2018
+# Latest rectified: Apr 9, 2018
 # -----------------------------------------------------
 import yaml
 
@@ -50,13 +50,15 @@ class STRPN(nn.Module):
         self.rpn_bbox_pred_net = nn.Conv2d(
             self.rpn_channels, self.num_anchors * 4, 1)
 
-        self.initialize_weight(True)
+        self.initialize_weight(False)
 
     def forward(self, head_features, gt_boxes, im_info):
         rois, rpn_info, label, bbox_info = self.region_proposal(
             head_features, gt_boxes, im_info)
         rpn_label, rpn_bbox_info, rpn_cls_score, rpn_bbox_pred = rpn_info
 
+        rpn_cls_score = rpn_cls_score.view(-1, 2)
+        rpn_label = rpn_label.view(-1)
         rpn_select = Variable((rpn_label.data != -1)).nonzero().view(-1)
         rpn_cls_score = rpn_cls_score.index_select(
             0, rpn_select).contiguous().view(-1, 2)
@@ -68,9 +70,44 @@ class STRPN(nn.Module):
         rpn_loss = (rpn_cls_loss, rpn_box_loss)
 
         # TODO: add roi-pooling
-        pooled_feat = self.pooling(head_features, rois)
+        pooled_feat = self.pooling(head_features, rois, max_pool=False)
 
         return pooled_feat, rpn_loss, label, bbox_info
+
+    def pooling(self, bottom, rois, max_pool=True):
+        rois = rois.detach()
+        x1 = rois[:, 1::4] / 16.0
+        y1 = rois[:, 2::4] / 16.0
+        x2 = rois[:, 3::4] / 16.0
+        y2 = rois[:, 4::4] / 16.0
+
+        height = bottom.size(2)
+        width = bottom.size(3)
+
+        # affine theta
+        theta = Variable(rois.data.new(rois.size(0), 2, 3).zero_())
+        theta[:, 0, 0] = (x2 - x1) / (width - 1)
+        theta[:, 0, 2] = (x1 + x2 - width + 1) / (width - 1)
+        theta[:, 1, 1] = (y2 - y1) / (height - 1)
+        theta[:, 1, 2] = (y1 + y2 - height + 1) / (height - 1)
+
+        pooling_size = self.config['pooling_size']
+        if max_pool:
+            pre_pool_size = pooling_size * 2
+            grid = F.affine_grid(theta, torch.Size(
+                (rois.size(0), 1, pre_pool_size, pre_pool_size)))
+            crops = F.grid_sample(
+                bottom.expand(rois.size(0), bottom.size(1), bottom.size(2),
+                              bottom.size(3)), grid)
+            crops = F.max_pool2d(crops, 2, 2)
+        else:
+            grid = F.affine_grid(theta, torch.Size(
+                (rois.size(0), 1, pooling_size, pooling_size)))
+            crops = F.grid_sample(
+                bottom.expand(rois.size(0), bottom.size(1), bottom.size(2),
+                              bottom.size(3)), grid)
+
+        return crops
 
     def anchor_compose(self, height, width):
         anchors = generate_anchors(ratios=np.array(self.anchor_ratios),
@@ -96,7 +133,7 @@ class STRPN(nn.Module):
         rpn_cls_score = self.rpn_cls_score_net(rpn)
         rpn_cls_score_reshape = rpn_cls_score.view(
             1, 2, -1, rpn_cls_score.size()[-1])
-        rpn_cls_prob_reshape = F.softmax(rpn_cls_score_reshape)
+        rpn_cls_prob_reshape = F.softmax(rpn_cls_score_reshape)  # TODO: dim
         rpn_cls_prob = rpn_cls_prob_reshape.view_as(rpn_cls_score).permute(
             0, 2, 3, 1)
         rpn_cls_score = rpn_cls_score.permute(0, 2, 3, 1)
@@ -190,7 +227,7 @@ class STRPN(nn.Module):
             return bbox_transform(torch.from_numpy(ex_rois),
                                   torch.from_numpy(gt_rois[:, :4])).numpy()
 
-        all_anchors = self.anchors.data.cpu.numpy()
+        all_anchors = self.anchors.data.cpu().numpy()
         gt_boxes = gt_boxes.data.cpu().numpy()
         rpn_cls_score = rpn_cls_score.data
 
@@ -298,23 +335,25 @@ class STRPN(nn.Module):
         # labels
         labels = labels.reshape((1, height, width, A)).transpose(0, 3, 1, 2)
         labels = labels.reshape((1, 1, A * height, width))
-        rpn_labels = labels.long()
+        rpn_labels = Variable(torch.from_numpy(labels).float().cuda()).long()
 
         # bbox_targets
         bbox_targets = bbox_targets.reshape((1, height, width, A * 4))
 
-        rpn_bbox_targets = bbox_targets
+        rpn_bbox_targets = Variable(
+            torch.from_numpy(bbox_targets).float().cuda())
         # bbox_inside_weights
         bbox_inside_weights = bbox_inside_weights.reshape(
             (1, height, width, A * 4))
-
-        rpn_bbox_inside_weights = bbox_inside_weights
+        rpn_bbox_inside_weights = Variable(
+            torch.from_numpy(bbox_inside_weights).float().cuda())
 
         # bbox_outside_weights
         bbox_outside_weights = bbox_outside_weights.reshape(
             (1, height, width, A * 4))
+        rpn_bbox_outside_weights = Variable(
+            torch.from_numpy(bbox_outside_weights).float().cuda())
 
-        rpn_bbox_outside_weights = bbox_outside_weights
         return rpn_labels, (rpn_bbox_targets, rpn_bbox_inside_weights,
                             rpn_bbox_outside_weights)
 
@@ -487,7 +526,7 @@ class STRPN(nn.Module):
         all_rois = torch.cat(
             (Variable(torch.cat((zeros, gt_boxes.data[:, :4]), 1)),
              all_rois), 0)
-        # not sure if it a wise appending, but anyway i am not using it
+        # this may be a mistake, but all_scores is redundant anyway
         all_scores = torch.cat((all_scores, Variable(zeros)), 0)
 
         num_images = 1
