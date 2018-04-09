@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectified: Apr 8, 2018
+# Latest rectified: Apr 9, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -48,14 +48,14 @@ class SIPN(nn.Module):
         self.cls_score_net = nn.Linear(self.fc7_channels, 2)
         self.bbox_pred_net = nn.Linear(self.fc7_channels, 8)
         self.reid_feat_net = nn.Linear(self.fc7_channels, self.reid_feat_dim)
-        self.init_linear_weight(True)
+        self.init_linear_weight(False)
 
     def forward(self, im_data, gt_boxes, im_info):
         net_conv = self.head(im_data)
         # returned parameters contain 3 tuples here
         pooled_feat, rpn_loss, label, bbox_info = self.strpn(
             net_conv, gt_boxes, im_info)
-        fc7 = self.tail(pooled_feat)
+        fc7 = self.tail(pooled_feat).mean(3).mean(2)
         cls_score = self.cls_score_net(fc7)
         bbox_pred = self.bbox_pred_net(fc7)
         reid_feat = F.normalize(self.reid_feat_net(fc7))
@@ -64,6 +64,7 @@ class SIPN(nn.Module):
         cls_prob = F.softmax(cls_score)
         det_label, pid_label = label
 
+        det_label = det_label.view(-1)
         cls_loss = F.cross_entropy(cls_score.view(-1, 2), det_label)
         bbox_loss = smooth_l1_loss(bbox_pred, bbox_info)
         reid_loss = oim_loss(reid_feat, pid_label, self.num_pid,
