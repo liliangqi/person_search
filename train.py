@@ -91,11 +91,11 @@ def main():
 
     # TODO: add resume
     all_epoch_loss = 0
+    start = time.time()
 
     for epoch in range(opt.epochs):
-        network.train()
         epoch_start = time.time()
-        start = epoch_start
+        network.train()
 
         if use_cuda:
             network.cuda()
@@ -117,27 +117,28 @@ def main():
 
             losses = network(im, gt_boxes, im_info)
             optimiz.zero_grad()
-            losses.sum().backward()
+            total_loss = sum(losses)
+            total_loss.backward()
             optimiz.step()
 
-            for loss in losses:
-                all_epoch_loss += loss.data
+            all_epoch_loss += total_loss.data[0]
             current_iter = epoch * len(dataset) + step + 1
             average_loss = all_epoch_loss / current_iter
 
-            if step % config['disp_interval'] == 0:
+            if (step+1) % config['disp_interval'] == 0:
                 end = time.time()
                 print('Epoch {:2d}, iter {:5d}, average loss: {:.6f}, lr: '
-                      '{:.2e}'.format(epoch, step, average_loss, lr))
-                print('>>>> rpn_cls: {:.6f}'.format(losses[0].data))
-                print('>>>> rpn_box: {:.6f}'.format(losses[1].data))
-                print('>>>> cls: {:.6f}'.format(losses[2].data))
-                print('>>>> box: {:.6f}'.format(losses[3].data))
-                print('>>>> reid: {:.6f}'.format(losses[4].data))
-                print('time cost: {:.3f}s'.format(end - start))
+                      '{:.2e}'.format(epoch+1, step+1, average_loss, lr))
+                print('>>>> rpn_cls: {:.6f}'.format(losses[0].data[0]))
+                print('>>>> rpn_box: {:.6f}'.format(losses[1].data[0]))
+                print('>>>> cls: {:.6f}'.format(losses[2].data[0]))
+                print('>>>> box: {:.6f}'.format(losses[3].data[0]))
+                print('>>>> reid: {:.6f}'.format(losses[4].data[0]))
+                print('time cost: {:.3f}s/iter'.format(
+                    (end - start) / (epoch * len(dataset) + (step + 1))))
 
         epoch_end = time.time()
-        print('\nEntire epoch time cost: {.2f} hours\n'.format(
+        print('\nEntire epoch time cost: {:.2f} hours\n'.format(
             (epoch_end - epoch_start) / 3600))
 
         save_name = os.path.join(save_dir, 'sipn_{}.pth'.format(epoch))
