@@ -6,6 +6,7 @@ rpn_channels: 512
 anchor_scales: [8, 16, 32]
 anchor_ratios: [0.5, 1, 2]
 rpn_feat_stride: [16]
+pooling_size: 7
 
 train_rpn_pre_nms_top_n: 12000
 train_rpn_post_nms_top_n: 2000
