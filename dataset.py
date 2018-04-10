@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 28, 2018
-# Latest rectifying: Apr 8, 2018
+# Latest rectified: Apr 9, 2018
 # -----------------------------------------------------
 
 import os
@@ -33,7 +33,8 @@ def _compute_iou(a, b):
 
 class PersonSearchDataset:
 
-    def __init__(self, root_dir, split_name='train', gallery_size=100):
+    def __init__(self, root_dir, split_name='train', gallery_size=100,
+                 test_mode='gallery'):
         """
         create person search dataset
         ---
@@ -82,6 +83,13 @@ class PersonSearchDataset:
                 osp.join(self.annotation_dir, q_to_g_file))
             self.delta_to_coordinates()
             self.num_test_images = self.test_imnames.shape[0]
+            self.test_imnames_list = list(range(self.num_test_images))[::-1]
+
+            # TODO: split query and gallery completely
+            self.test_mode = test_mode
+            if self.test_mode == 'query':
+                self.query_imnames_list = list(range(
+                    self.queries_to_galleries.shape[0]))[::-1]
 
         else:
             raise KeyError(self.split)
@@ -174,9 +182,9 @@ class PersonSearchDataset:
             #     self.train_imnames = pd.read_csv(
             #         osp.join(self.cache_dir, self.train_imnamesDF_file))
 
-            choosen = self.train_imnames_list.pop()
-            im_name, flipped = self.train_imnames.loc[choosen]
-            self.train_imnames.drop(choosen, inplace=True)
+            chosen = self.train_imnames_list.pop()
+            im_name, flipped = self.train_imnames.loc[chosen]
+            self.train_imnames.drop(chosen, inplace=True)  # TODO: remove this
 
             im = cv2.imread(osp.join(self.images_dir, im_name))
             if flipped == 1:
@@ -195,6 +203,7 @@ class PersonSearchDataset:
             im = im[np.newaxis, :]  # add batch dimension
 
             df = self.train_all.copy()
+            # TODO: use panda.query
             df = df[df['imname'] == im_name]
             df = df[df['flipped'] == flipped]
             gt_boxes = df.loc[:, 'x1': 'pid']
@@ -205,6 +214,77 @@ class PersonSearchDataset:
                                dtype=np.float32)
 
             return im, gt_boxes, im_info
+
+        elif self.split == 'test':
+            if self.test_mode == 'gallery':
+                # TODO: change with cfg parameters
+                target_size = 600
+                max_size = 1000
+                pixel_means = np.array([[[102.9801, 115.9465, 122.7717]]])
+
+                chosen = self.test_imnames_list.pop()
+                im_name = self.test_imnames.loc[chosen]
+
+                im = cv2.imread(osp.join(self.images_dir, im_name))
+                orig_shape = im.shape
+                im = im.astype(np.float32, copy=True)
+                im -= pixel_means
+                im_shape = im.shape
+                im_size_min = np.min(im_shape[0:2])
+                im_size_max = np.max(im_shape[0:2])
+                im_scale = float(target_size) / float(im_size_min)
+                # Prevent the biggest axis from being more than MAX_SIZE
+                if np.round(im_scale * im_size_max) > max_size:
+                    im_scale = float(max_size) / float(im_size_max)
+                im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale,
+                                interpolation=cv2.INTER_LINEAR)
+                im = im[np.newaxis, :]  # add batch dimension
+
+                im_info = np.array([im.shape[1], im.shape[2], im_scale],
+                                   dtype=np.float32)
+
+                return im, im_info, orig_shape
+
+            elif self.test_mode == 'query':
+                # TODO: change with cfg parameters
+                target_size = 600
+                max_size = 1000
+                pixel_means = np.array([[[102.9801, 115.9465, 122.7717]]])
+
+                chosen = self.query_imnames_list.pop()
+                im_name = self.queries_to_galleries.iloc[chosen, 0]
+
+                im = cv2.imread(osp.join(self.images_dir, im_name))
+                im = im.astype(np.float32, copy=True)
+                im -= pixel_means
+                im_shape = im.shape
+                im_size_min = np.min(im_shape[0:2])
+                im_size_max = np.max(im_shape[0:2])
+                im_scale = float(target_size) / float(im_size_min)
+                # Prevent the biggest axis from being more than MAX_SIZE
+                if np.round(im_scale * im_size_max) > max_size:
+                    im_scale = float(max_size) / float(im_size_max)
+                im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale,
+                                interpolation=cv2.INTER_LINEAR)
+                im = im[np.newaxis, :]  # add batch dimension
+
+                df = self.test_all.copy()
+                df = df[df['imname'] == im_name]
+                gt_boxes = df[df['is_query'] == 1]
+                gt_boxes = gt_boxes[gt_boxes['pid'] == chosen]
+                gt_boxes = gt_boxes.loc[:, 'x1': 'y2'] * im_scale
+                gt_boxes = gt_boxes.as_matrix()
+
+                im_info = np.array([im.shape[1], im.shape[2], im_scale],
+                                   dtype=np.float32)
+
+                return im, gt_boxes, im_info
+
+            else:
+                raise KeyError(self.test_mode)
+
+        else:
+            raise KeyError(self.split)
 
     def test_image_path(self, i):
         return osp.join(self.images_dir, self.test_imnames.iloc[i])
