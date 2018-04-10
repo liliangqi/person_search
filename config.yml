@@ -32,3 +32,6 @@ train_bbox_inside_weights: [1.0, 1.0, 1.0, 1.0]
 test_rpn_pre_nms_top_n: 6000
 test_rpn_post_nms_top_n: 300
 test_rpn_nms_thresh: 0.7
+
+test_bbox_reg: True
+test_nms: 0.3
