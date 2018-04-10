@@ -52,27 +52,43 @@ class STRPN(nn.Module):
 
         self.initialize_weight(False)
 
-    def forward(self, head_features, gt_boxes, im_info):
-        rois, rpn_info, label, bbox_info = self.region_proposal(
-            head_features, gt_boxes, im_info)
-        rpn_label, rpn_bbox_info, rpn_cls_score, rpn_bbox_pred = rpn_info
+    def forward(self, head_features, gt_boxes, im_info, mode='gallery'):
+        if self.training:
+            rois, rpn_info, label, bbox_info = self.region_proposal(
+                head_features, gt_boxes, im_info)
+            rpn_label, rpn_bbox_info, rpn_cls_score, rpn_bbox_pred = rpn_info
 
-        rpn_cls_score = rpn_cls_score.view(-1, 2)
-        rpn_label = rpn_label.view(-1)
-        rpn_select = Variable((rpn_label.data != -1)).nonzero().view(-1)
-        rpn_cls_score = rpn_cls_score.index_select(
-            0, rpn_select).contiguous().view(-1, 2)
-        rpn_label = rpn_label.index_select(0, rpn_select).contiguous().view(-1)
+            rpn_cls_score = rpn_cls_score.view(-1, 2)
+            rpn_label = rpn_label.view(-1)
+            rpn_select = Variable((rpn_label.data != -1)).nonzero().view(-1)
+            rpn_cls_score = rpn_cls_score.index_select(
+                0, rpn_select).contiguous().view(-1, 2)
+            rpn_label = rpn_label.index_select(
+                0, rpn_select).contiguous().view(-1)
 
-        rpn_cls_loss = F.cross_entropy(rpn_cls_score, rpn_label)
-        rpn_box_loss = smooth_l1_loss(rpn_bbox_pred, rpn_bbox_info, sigma=3.0,
-                                      dim=[1, 2, 3])
-        rpn_loss = (rpn_cls_loss, rpn_box_loss)
+            rpn_cls_loss = F.cross_entropy(rpn_cls_score, rpn_label)
+            rpn_box_loss = smooth_l1_loss(rpn_bbox_pred, rpn_bbox_info,
+                                          sigma=3.0, dim=[1, 2, 3])
+            rpn_loss = (rpn_cls_loss, rpn_box_loss)
 
-        # TODO: add roi-pooling
-        pooled_feat = self.pooling(head_features, rois, max_pool=False)
+            # TODO: add roi-pooling
+            pooled_feat = self.pooling(head_features, rois, max_pool=False)
 
-        return pooled_feat, rpn_loss, label, bbox_info
+            return pooled_feat, rpn_loss, label, bbox_info
+
+        else:
+            if mode == 'gallery':
+                rois = self.region_proposal(head_features, gt_boxes, im_info)
+                pooled_feat = self.pooling(head_features, rois, max_pool=False)
+
+                return rois, pooled_feat
+
+            elif mode == 'query':
+                pooled_feat = self.pooling(head_features, gt_boxes, False)
+                return pooled_feat
+
+            else:
+                raise KeyError(mode)
 
     def pooling(self, bottom, rois, max_pool=True):
         rois = rois.detach()
@@ -165,7 +181,7 @@ class STRPN(nn.Module):
             post_nms_top_n = self.config['train_rpn_post_nms_top_n']
             nms_thresh = self.config['train_rpn_nms_thresh']
         else:
-            pre_nms_top_n = self.config['test_rpn_nms_thresh']
+            pre_nms_top_n = self.config['test_rpn_pre_nms_top_n']
             post_nms_top_n = self.config['test_rpn_post_nms_top_n']
             nms_thresh = self.config['test_rpn_nms_thresh']
 
