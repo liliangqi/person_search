@@ -213,14 +213,17 @@ class resnet:
         self.training = training
 
         if num_layers == 50:
-            if pre_model:
-                self.model = resnet50()
-                state_dict = torch.load(pre_model)
-                # TODO: distinguish training and testing
-                self.model.load_state_dict(
-                    {k: state_dict[k] for k in list(self.model.state_dict())})
+            if self.training:
+                if pre_model:
+                    self.model = resnet50()
+                    state_dict = torch.load(pre_model)
+                    self.model.load_state_dict(
+                        {k: state_dict[k] for k in list(
+                            self.model.state_dict())})
+                else:
+                    raise NotImplementedError('model does not match')
             else:
-                self.model = resnet50(True)
+                self.model = resnet50()
         else:
             raise KeyError(num_layers)
 
@@ -288,7 +291,3 @@ class resnet:
                     m.eval()
 
             self.model.apply(set_bn_eval)
-
-
-
-
