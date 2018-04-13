@@ -78,10 +78,15 @@ def main():
         config = yaml.load(f)
 
     params = []
+    times1 = 0
+    times2 = 0
     for key, value in dict(network.named_parameters()).items():
+        times1 += 1
         if value.requires_grad:
+            print(key)
+            times2 += 1
             # TODO: set different decay for weight and bias
-            params += [{'params': [value], 'lr': lr, 'weight_decay': 5e-4}]
+            params += [{'params': [value], 'lr': lr, 'weight_decay': 1e-4}]
 
     if opt.optimizer == 'SGD':
         optimiz = torch.optim.SGD(params, momentum=0.9)
@@ -92,15 +97,17 @@ def main():
     # TODO: add resume
     all_epoch_loss = 0
     start = time.time()
+    network.train()
+
+    if use_cuda:
+        network.cuda()
 
     for epoch in range(opt.epochs):
         epoch_start = time.time()
-        network.train()
-
-        if use_cuda:
-            network.cuda()
-        if epoch > 0 and epoch % 2 == 0:
+        if epoch in [2, 4]:
             lr *= config['gamma']  # TODO: use lr_scheduel
+            for param_group in optimiz.param_groups:
+                param_group['lr'] *= config['gamma']
         # load data for each epoch
         dataset = PersonSearchDataset(opt.data_dir)
 
