@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectifying: Apr 8, 2018
+# Latest rectifying: Apr 13, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -252,7 +252,7 @@ class resnet:
 
         def set_bn_fix(m):
             class_name = m.__class__.__name__
-            if class_name.find('BatchNorm') != 1:
+            if class_name.find('BatchNorm') != -1:
                 for p in m.parameters():
                     p.requires_grad = False
 
