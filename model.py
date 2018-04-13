@@ -18,10 +18,10 @@ from losses import oim_loss, smooth_l1_loss
 
 class SIPN(nn.Module):
 
-    def __init__(self, net_name, pre_model=None, training=True):
+    def __init__(self, net_name, pre_model=None, is_train=True):
         super().__init__()
         self.net_name = net_name
-        self.training = training
+        self.is_train = is_train
 
         # TODO: set depending on dataset
         self.num_pid = 5532
@@ -35,7 +35,7 @@ class SIPN(nn.Module):
             self.queue_size, self.reid_feat_dim).cuda())
 
         if self.net_name == 'res50':
-            self.net = resnet(50, pre_model, self.training)
+            self.net = resnet(50, pre_model, self.is_train)
         else:
             raise KeyError(self.net_name)
 
@@ -44,7 +44,7 @@ class SIPN(nn.Module):
         # SPIN consists of three main parts
         self.head = self.net.head
         self.strpn = STRPN(self.net.net_conv_channels, self.num_pid,
-                           self.training)
+                           self.is_train)
         self.tail = self.net.tail
 
         self.cls_score_net = nn.Linear(self.fc7_channels, 2)
@@ -53,7 +53,7 @@ class SIPN(nn.Module):
         self.init_linear_weight(False)
 
     def forward(self, im_data, gt_boxes, im_info, mode='gallery'):
-        if self.training:
+        if self.is_train:
             net_conv = self.head(im_data)
             # returned parameters contain 3 tuples here
             pooled_feat, rpn_loss, label, bbox_info = self.strpn(
