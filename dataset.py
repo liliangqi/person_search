@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 28, 2018
-# Latest rectified: Apr 9, 2018
+# Latest rectified: Apr 10, 2018
 # -----------------------------------------------------
 
 import os
@@ -68,7 +68,7 @@ class PersonSearchDataset:
             else:
                 self.train_imnames, self.train_all = self.prepare_training()
             self.train_imnames_list = list(range(self.train_imnames.shape[0]))
-            random.shuffle(self.train_imnames_list)  # shuffle the list
+            # random.shuffle(self.train_imnames_list)  # shuffle the list
             self.train_imnames_list_equip = self.train_imnames_list[:]
             self.num_train_images = self.train_imnames.shape[0]
 
