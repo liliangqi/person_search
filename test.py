@@ -166,7 +166,7 @@ def main():
     trained_model_dir = os.path.join('./output',
                                      'sipn_' + opt.trained_epochs + '.pth')
 
-    net = SIPN(opt.net, trained_model_dir, training=False)
+    net = SIPN(opt.net, trained_model_dir, is_train=False)
     net.eval()
     if use_cuda:
         net.cuda()
