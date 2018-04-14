@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 10, 2018
-# Latest rectified: Apr 10, 2018
+# Latest rectified: Apr 14, 2018
 # -----------------------------------------------------
 import os
 import argparse
@@ -11,15 +11,14 @@ import argparse
 import numpy as np
 import torch
 import yaml
-import torch.nn as nn
 from torch.autograd import Variable
 import time
-import cv2
 
 from dataset import PersonSearchDataset
 from model import SIPN
 from bbox_transform import bbox_transform_inv
 from nms.pth_nms import pth_nms as nms
+from __init__ import clock_non_return
 
 
 def parse_args():
@@ -157,6 +156,7 @@ def test_query(net, dataset, use_cuda):
     return all_features
 
 
+@clock_non_return
 def main():
     """Test the model"""
 
