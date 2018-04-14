@@ -68,7 +68,7 @@ class PersonSearchDataset:
             else:
                 self.train_imnames, self.train_all = self.prepare_training()
             self.train_imnames_list = list(range(self.train_imnames.shape[0]))
-            # random.shuffle(self.train_imnames_list)  # shuffle the list
+            random.shuffle(self.train_imnames_list)  # shuffle the list
             self.train_imnames_list_equip = self.train_imnames_list[:]
             self.num_train_images = self.train_imnames.shape[0]
 
@@ -175,16 +175,14 @@ class PersonSearchDataset:
             max_size = 1000
             pixel_means = np.array([[[102.9801, 115.9465, 122.7717]]])
 
-            # # prepare for the next epoch
-            # if len(self.train_imnames_list) == 0:
-            #     assert self.train_imnames.shape[0] == 0
-            #     self.train_imnames_list = self.train_imnames_list_equip[:]
-            #     self.train_imnames = pd.read_csv(
-            #         osp.join(self.cache_dir, self.train_imnamesDF_file))
+            # Prepare for the next epoch
+            if len(self.train_imnames_list) == 0:
+                self.train_imnames_list = self.train_imnames_list_equip[:]
+                self.train_imnames = pd.read_csv(
+                    osp.join(self.cache_dir, self.train_imnamesDF_file))
 
             chosen = self.train_imnames_list.pop()
             im_name, flipped = self.train_imnames.loc[chosen]
-            self.train_imnames.drop(chosen, inplace=True)  # TODO: remove this
 
             im = cv2.imread(osp.join(self.images_dir, im_name))
             if flipped == 1:
