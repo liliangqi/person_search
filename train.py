@@ -3,19 +3,17 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 31, 2018
-# Latest rectified: Apr 9, 2018
+# Latest rectified: Apr 14, 2018
 # -----------------------------------------------------
 import os
-import sys
 import argparse
 
-import numpy as np
 import torch
 import yaml
-import torch.nn as nn
 from torch.autograd import Variable
 import time
 
+from __init__ import clock_non_return
 from dataset import PersonSearchDataset
 from model import SIPN
 
@@ -57,59 +55,25 @@ def cuda_mode(args):
     return cuda
 
 
-def train_model(dataset, net, learning_rate, optimizer, num_epochs):
+def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir):
     """Train the model"""
-    pass
 
+    all_epoch_loss = 0
+    start = time.time()
+    net.train()
 
+    if use_cuda:
+        net.cuda()
 
-def main():
-
-    opt = parse_args()
-    use_cuda = cuda_mode(opt)
-    network = SIPN(opt.net, opt.pre_model)
-
-    save_dir = opt.out_dir
-    if not os.path.exists(save_dir):
-        os.makedirs(save_dir)
-
-    lr = opt.lr
     with open('config.yml', 'r') as f:
         config = yaml.load(f)
 
-    params = []
-    times1 = 0
-    times2 = 0
-    for key, value in dict(network.named_parameters()).items():
-        times1 += 1
-        if value.requires_grad:
-            print(key)
-            times2 += 1
-            # TODO: set different decay for weight and bias
-            params += [{'params': [value], 'lr': lr, 'weight_decay': 1e-4}]
-
-    if opt.optimizer == 'SGD':
-        optimiz = torch.optim.SGD(params, momentum=0.9)
-    elif opt.optimizer == 'Adam':
-        lr *= 0.1
-        optimiz = torch.optim.Adam(params)
-
-    # TODO: add resume
-    all_epoch_loss = 0
-    start = time.time()
-    network.train()
-
-    if use_cuda:
-        network.cuda()
-
-    for epoch in range(opt.epochs):
+    for epoch in range(num_epochs):
         epoch_start = time.time()
         if epoch in [2, 4]:
             lr *= config['gamma']  # TODO: use lr_scheduel
-            for param_group in optimiz.param_groups:
+            for param_group in optimizer.param_groups:
                 param_group['lr'] *= config['gamma']
-        # load data for each epoch
-        dataset = PersonSearchDataset(opt.data_dir)
 
         for step in range(len(dataset)):
             im, gt_boxes, im_info = dataset.next()
@@ -122,11 +86,11 @@ def main():
                 im = Variable(torch.from_numpy(im))
                 gt_boxes = Variable(torch.from_numpy(gt_boxes).float())
 
-            losses = network(im, gt_boxes, im_info)
-            optimiz.zero_grad()
+            losses = net(im, gt_boxes, im_info)
+            optimizer.zero_grad()
             total_loss = sum(losses)
             total_loss.backward()
-            optimiz.step()
+            optimizer.step()
 
             all_epoch_loss += total_loss.data[0]
             current_iter = epoch * len(dataset) + step + 1
@@ -148,20 +112,50 @@ def main():
         print('\nEntire epoch time cost: {:.2f} hours\n'.format(
             (epoch_end - epoch_start) / 3600))
 
-        save_name = os.path.join(save_dir, 'sipn_{}.pth'.format(epoch))
-        torch.save(network.state_dict(), save_name)
+        # Save the trained model after each epoch
+        save_name = os.path.join(save_dir, 'sipn_{}.pth'.format(epoch + 1))
+        torch.save(net.state_dict(), save_name)
 
+
+@clock_non_return
+def main():
+
+    opt = parse_args()
+    use_cuda = cuda_mode(opt)
+    model = SIPN(opt.net, opt.pre_model)
+
+    # Load the dataset
+    dataset = PersonSearchDataset(opt.data_dir)
+
+    save_dir = opt.out_dir
+    print('Trained models will be save to', os.path.abspath(save_dir))
+    if not os.path.exists(save_dir):
+        os.makedirs(save_dir)
+
+    # Choose parameters to be updated during training
+    lr = opt.lr
+    params = []
+    print('These parameters will be updated during training:')
+    for key, value in dict(model.named_parameters()).items():
+        if value.requires_grad:
+            print(key)
+            # TODO: set different decay for weight and bias
+            params += [{'params': [value], 'lr': lr, 'weight_decay': 1e-4}]
+
+    if opt.optimizer == 'SGD':
+        optimizer = torch.optim.SGD(params, momentum=0.9)
+    elif opt.optimizer == 'Adam':
+        lr *= 0.1
+        optimizer = torch.optim.Adam(params)
+    else:
+        raise KeyError(opt.optimizer)
+
+    # TODO: add resume
+
+    # Train the model
+    train_model(dataset, model, lr, optimizer, opt.epochs, use_cuda, save_dir)
 
 
 if __name__ == '__main__':
 
     main()
-
-
-
-
-
-
-
-
-
