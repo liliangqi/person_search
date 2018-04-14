@@ -1,3 +1,10 @@
+# -----------------------------------------------------
+# Initial Settings for Taining and Testing SIPN
+#
+# Author: Liangqi Li
+# Creating Date: Apr 14, 2018
+# Latest rectified: Apr 14, 2018
+# -----------------------------------------------------
 import time
 import functools
 
