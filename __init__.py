@@ -15,5 +15,6 @@ def clock_non_return(func):
         t0 = time.time()
         func(*args, **kwargs)
         eplapsed = time.time() - t0
-        print('Entire process costs {:.2f} hours.'.format(eplapsed))
+        print('\n' + '*' * 40)
+        print('Entire process costs {:.2f} hours.'.format(eplapsed / 3600))
     return clocked
