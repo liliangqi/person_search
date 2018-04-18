@@ -155,6 +155,8 @@ def main():
     # Train the model
     train_model(dataset, model, lr, optimizer, opt.epochs, use_cuda, save_dir)
 
+    print('Done.\n')
+
 
 if __name__ == '__main__':
 
