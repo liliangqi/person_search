@@ -6,6 +6,14 @@ cd ../..
 python build.py
 cd ..
 
+# compile roi_pooling
+cd roi_pooling/src/cuda
+echo "Compiling roi pooling kernels by nvcc..."
+nvcc -c -o roi_pooling_kernel.cu.o roi_pooling_kernel.cu -x cu -Xcompiler -fPIC -arch=sm_52
+cd ../..
+python build.py
+cd ..
+
 # test on my own computer
 ln -s ../person_search_caffe/data/psdb data
 cd data
