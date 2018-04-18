@@ -19,6 +19,7 @@ from losses import smooth_l1_loss
 from bbox_transform import bbox_transform, bbox_transform_inv, clip_boxes, \
     bbox_overlaps
 from nms.pth_nms import pth_nms as nms
+from roi_pooling.roi_pool import RoIPoolFunction
 
 
 class STRPN(nn.Module):
@@ -42,6 +43,9 @@ class STRPN(nn.Module):
         self.anchor_ratios = self.config['anchor_ratios']
         self.num_anchors = len(self.anchor_scales) * len(self.anchor_ratios)
         self.anchors = None  # to be set in other methods
+
+        pooling_size = self.config['pooling_size']
+        self.roi_pool = RoIPoolFunction(pooling_size, pooling_size, 1. / 16.)
 
         self.rpn_net = nn.Conv2d(
             net_conv_channels, self.rpn_channels, 3, padding=1)
@@ -71,7 +75,10 @@ class STRPN(nn.Module):
                                           sigma=3.0, dim=[1, 2, 3])
             rpn_loss = (rpn_cls_loss, rpn_box_loss)
 
-            # TODO: add roi-pooling
+            # add roi-pooling
+            # pooled_feat = self.roi_pool(head_features, rois)
+
+            # crop and resize
             pooled_feat = self.pooling(head_features, rois, max_pool=False)
 
             return pooled_feat, rpn_loss, label, bbox_info
@@ -79,11 +86,19 @@ class STRPN(nn.Module):
         else:
             if mode == 'gallery':
                 rois = self.region_proposal(head_features, gt_boxes, im_info)
+
+                # add roi-pooling
+                # pooled_feat = self.roi_pool(head_features, rois)
+
+                # crop and resize
                 pooled_feat = self.pooling(head_features, rois, max_pool=False)
 
                 return rois, pooled_feat
 
             elif mode == 'query':
+                # roi-pooling
+                # pooled_feat = self.roi_pool(head_features, gt_boxes)
+                # crop and resize
                 pooled_feat = self.pooling(head_features, gt_boxes, False)
                 return pooled_feat
 
@@ -466,12 +481,34 @@ class STRPN(nn.Module):
             # fixed number of regions are sampled
             if fg_inds.numel() > 0 and bg_inds.numel() > 0:
                 fg_rois_per_im = min(fg_rois_per_im, fg_inds.numel())
-                fg_inds = fg_inds[torch.from_numpy(
-                    npr.choice(np.arange(0, fg_inds.numel()),
-                               size=int(fg_rois_per_im),
-                               replace=False)).long().cuda()]
-                fg_inds = torch.from_numpy(
-                    (np.sort(fg_inds.cpu().numpy()))).long().cuda()
+
+                if gt_box.size(0) < fg_rois_per_im:
+                    gt_inds = torch.from_numpy(np.arange(
+                        0, gt_box.size(0))).long().cuda()
+                    fg_inds = torch.cat((gt_inds, fg_inds[torch.from_numpy(
+                        npr.choice(np.arange(gt_box.size(0), fg_inds.numel()),
+                                   size=int(fg_rois_per_im) - gt_box.size(0),
+                                   replace=False)).long().cuda()]))
+                else:
+                    lab_inds = (gt_box[:, 5] != -1).nonzero().squeeze().data
+                    if -1 in gt_box[:, 5].data:
+                        unlab_inds = (gt_box[:, 5] == -1).nonzero().squeeze(
+                            ).data
+                        fg_inds = torch.cat((lab_inds, torch.from_numpy(
+                            npr.choice(unlab_inds.cpu().numpy(),
+                                       size=fg_rois_per_im - lab_inds.numel(),
+                                       replace=False)).long().cuda()))
+                    else:
+                        fg_inds = lab_inds
+
+                # # =================origin==========================
+                # fg_inds = fg_inds[torch.from_numpy(
+                #     npr.choice(np.arange(0, fg_inds.numel()),
+                #                size=int(fg_rois_per_im),
+                #                replace=False)).long().cuda()]
+                # fg_inds = torch.from_numpy(
+                #     (np.sort(fg_inds.cpu().numpy()))).long().cuda()
+
                 bg_rois_per_im = rois_per_im - fg_rois_per_im
                 to_replace = bg_inds.numel() < bg_rois_per_im
                 bg_inds = bg_inds[torch.from_numpy(
