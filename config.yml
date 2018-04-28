@@ -8,6 +8,10 @@ anchor_ratios: [0.5, 1, 2]
 rpn_feat_stride: [16]
 pooling_size: 7
 
+target_size: 600
+max_size: 1000
+pixel_means: [102.9801, 115.9465, 122.7717]
+
 train_rpn_pre_nms_top_n: 12000
 train_rpn_post_nms_top_n: 2000
 train_rpn_nms_thresh: 0.7
