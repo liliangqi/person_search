@@ -113,7 +113,8 @@ def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir):
             (epoch_end - epoch_start) / 3600))
 
         # Save the trained model after each epoch
-        save_name = os.path.join(save_dir, 'sipn_{}.pth'.format(epoch + 1))
+        save_name = os.path.join(
+            save_dir, 'sipn_{}_{}.pth'.format(net.net_name, epoch + 1))
         torch.save(net.state_dict(), save_name)
 
 
