@@ -99,6 +99,8 @@ def fix_train_test(root_dir):
                                 header=None, squeeze=True)
     test_imnames = pd.read_csv(os.path.join(root_dir, 'testImnamesSe.csv'),
                                header=None, squeeze=True)
+    train_ids = sio.loadmat(os.path.join(
+        root_dir, 'ID_train.mat'))['ID_train'].squeeze()
     test_ids = sio.loadmat(os.path.join(
         root_dir, 'ID_test.mat'))['ID_test2'].squeeze()
 
@@ -126,15 +128,23 @@ def fix_train_test(root_dir):
     train_boxes_df.index = range(train_boxes_df.shape[0])
     test_boxes_df.index = range(test_boxes_df.shape[0])
 
+    train_dict = {id_num: i for i, id_num in enumerate(train_ids)}
+    test_dict = {id_num: i for i, id_num in enumerate(test_ids)}
+
     # Change those IDs not in test_ids to -1
     for i in range(test_boxes_df.shape[0]):
         if test_boxes_df.ix[i, 'pid'] not in test_ids:
             test_boxes_df.ix[i, 'pid'] = -1
+        else:
+            test_boxes_df.ix[i, 'pid'] = test_dict[test_boxes_df.ix[i, 'pid']]
 
     # Change pid with value -2 in training set to -1
     for i in range(train_boxes_df.shape[0]):
         if train_boxes_df.ix[i, 'pid'] == -2:
             train_boxes_df.ix[i, 'pid'] = -1
+        else:
+            train_boxes_df.ix[i, 'pid'] = train_dict[
+                train_boxes_df.ix[i, 'pid']]
 
     # Rewirte csv files
     train_boxes_df.to_csv(os.path.join(root_dir, 'trainAllDF.csv'),
