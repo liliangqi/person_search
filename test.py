@@ -7,6 +7,7 @@
 # -----------------------------------------------------
 import os
 import argparse
+import pickle
 
 import numpy as np
 import torch
@@ -30,6 +31,7 @@ def parse_args():
     parser.add_argument('--gpu_ids', default='0', type=str)
     parser.add_argument('--data_dir', default='', type=str)
     parser.add_argument('--out_dir', default='./output', type=str)
+    parser.add_argument('--use_saved_result', default=0, type=int)
 
     args = parser.parse_args()
 
@@ -68,7 +70,7 @@ def clip_boxes(boxes, im_shape):
     return boxes
 
 
-def test_gallery(net, dataset, use_cuda, thresh=0.):
+def test_gallery(net, dataset, use_cuda, output_dir, thresh=0.5):
     """test gallery images"""
 
     with open('config.yml', 'r') as f:
@@ -80,7 +82,7 @@ def test_gallery(net, dataset, use_cuda, thresh=0.):
     start = time.time()
 
     for i in range(num_images):
-        im, im_info, orig_shape = dataset.next()
+        im, im_info, orig_shape, _ = dataset.next()
         im = im.transpose([0, 3, 1, 2])
 
         if use_cuda:
@@ -122,10 +124,18 @@ def test_gallery(net, dataset, use_cuda, thresh=0.):
         print('im_detect: {:d}/{:d} {:.3f}s'.format(
             i + 1, num_images, (end - start) / (i + 1)))
 
+    det_file = os.path.join(output_dir, 'gboxes.pkl')
+    with open(det_file, 'wb') as f:
+        pickle.dump(all_boxes, f, pickle.HIGHEST_PROTOCOL)
+
+    feature_file = os.path.join(output_dir, 'gfeatures.pkl')
+    with open(feature_file, 'wb') as f:
+        pickle.dump(all_features, f, pickle.HIGHEST_PROTOCOL)
+
     return all_boxes, all_features
 
 
-def test_query(net, dataset, use_cuda):
+def test_query(net, dataset, use_cuda, output_dir):
     """Test query images"""
 
     # TODO: use __len__()
@@ -153,6 +163,10 @@ def test_query(net, dataset, use_cuda):
         print('query_exfeat: {:d}/{:d} {:.3f}s'.format(
             i + 1, num_images, (end - start) / (i + 1)))
 
+    feature_file = os.path.join(output_dir, 'qfeatures.pkl')
+    with open(feature_file, 'wb') as f:
+        pickle.dump(all_features, f, pickle.HIGHEST_PROTOCOL)
+
     return all_features
 
 
@@ -161,31 +175,50 @@ def main():
     """Test the model"""
 
     opt = parse_args()
-    use_cuda = cuda_mode(opt)
-
-    trained_model_dir = os.path.join('./output',
-                                     'sipn_' + opt.trained_epochs + '.pth')
-
-    net = SIPN(opt.net, trained_model_dir, is_train=False)
-    net.eval()
-    if use_cuda:
-        net.cuda()
-
-    # load trained model
-    print('Loading model check point from {:s}'.format(trained_model_dir))
-    net.load_trained_model(torch.load(trained_model_dir))
+    test_result_dir = os.path.join(opt.out_dir, 'test_result')
 
     dataset_gallery = PersonSearchDataset(opt.data_dir, split_name='test',
-                                          gallery_size=100)
-    dataset_query = PersonSearchDataset(opt.data_dir, split_name='test',
-                                        gallery_size=100, test_mode='query')
+                                          gallery_size=200)
 
-    g_boxes, g_features = test_gallery(net, dataset_gallery, use_cuda)
-    q_features = test_query(net, dataset_query, use_cuda)
+    if opt.use_saved_result:
+        gboxes_file = open(os.path.join(test_result_dir, 'gboxes.pkl'), 'rb')
+        g_boxes = pickle.load(gboxes_file)
+        gfeatures_file = open(os.path.join(test_result_dir,
+                                           'gfeatures.pkl'), 'rb')
+        g_features = pickle.load(gfeatures_file)
+        qfeatures_file = open(os.path.join(test_result_dir, 'qfeatures.pkl'),
+                              'rb')
+        q_features = pickle.load(qfeatures_file)
 
-    dataset_gallery.evaluate_detections(g_boxes, det_thresh=0.5)
+    else:
+        use_cuda = cuda_mode(opt)
+
+        trained_model_dir = os.path.join('./output', 'sipn_' + opt.net + '_' +
+                                         opt.trained_epochs + '.pth')
+
+        if not os.path.exists(test_result_dir):
+            os.makedirs(test_result_dir)
+
+        net = SIPN(opt.net, trained_model_dir, is_train=False)
+        net.eval()
+        if use_cuda:
+            net.cuda()
+
+        # load trained model
+        print('Loading model check point from {:s}'.format(trained_model_dir))
+        net.load_trained_model(torch.load(trained_model_dir))
+
+        dataset_query = PersonSearchDataset(opt.data_dir, split_name='test',
+                                            gallery_size=200,
+                                            test_mode='query')
+
+        g_boxes, g_features = test_gallery(net, dataset_gallery, use_cuda,
+                                           test_result_dir)
+        q_features = test_query(net, dataset_query, use_cuda, test_result_dir)
+
+    # dataset_gallery.evaluate_detections(g_boxes, det_thresh=0.5)
     dataset_gallery.evaluate_search(g_boxes, g_features, q_features,
-                                    det_thresh=0.5, gallery_size=100,
+                                    det_thresh=0.5, gallery_size=200,
                                     dump_json=None)
 
 
