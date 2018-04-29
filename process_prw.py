@@ -159,6 +159,10 @@ def fix_train_test(root_dir):
 def produce_query_set(root_dir):
     """Produce query set"""
 
+    test_ids = sio.loadmat(os.path.join(
+        root_dir, 'ID_test.mat'))['ID_test2'].squeeze()
+    test_dict = {id_num: i for i, id_num in enumerate(test_ids)}
+
     query_imnames = []  # TODO: change is_query in dataset.py
     query_boxes = np.zeros((1, 5), dtype=np.int32)
 
@@ -178,6 +182,10 @@ def produce_query_set(root_dir):
         query_boxes, columns=['pid', 'x1', 'y1', 'del_x', 'del_y'])
     query_boxes_df['imname'] = query_imnames
     query_boxes_df = query_boxes_df[ordered_columns]
+
+    for i in range(query_boxes_df.shape[0]):
+        query_boxes_df.ix[i, 'pid'] = test_dict[query_boxes_df.ix[i, 'pid']]
+
     query_boxes_df.to_csv(os.path.join(root_dir, 'queryDF.csv'), index=False)
 
 
@@ -236,7 +244,6 @@ def main():
     # fix_train_test(root_dir)
     # produce_query_set(root_dir)
     produce_query_gallery(root_dir)
-
 
 if __name__ == '__main__':
 
