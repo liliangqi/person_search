@@ -12,6 +12,7 @@ import torch.nn.functional as F
 import yaml
 
 from resnet import resnet
+from densenet import densenet
 from strpn import STRPN
 from losses import oim_loss, smooth_l1_loss
 
@@ -24,8 +25,8 @@ class SIPN(nn.Module):
         self.is_train = is_train
 
         # TODO: set depending on dataset
-        self.num_pid = 5532
-        self.queue_size = 5000
+        self.num_pid = 483
+        self.queue_size = 500
         self.lut_momentum = 0.5
         self.reid_feat_dim = 256
 
@@ -36,6 +37,10 @@ class SIPN(nn.Module):
 
         if self.net_name == 'res50':
             self.net = resnet(50, pre_model, self.is_train)
+        elif self.net_name == 'dense121':
+            self.net = densenet(121, pre_model, self.is_train)
+        elif self.net_name == 'dense161':
+            self.net = densenet(161, pre_model, self.is_train)
         else:
             raise KeyError(self.net_name)
 
