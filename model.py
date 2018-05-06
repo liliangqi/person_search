@@ -25,8 +25,8 @@ class SIPN(nn.Module):
         self.is_train = is_train
 
         # TODO: set depending on dataset
-        self.num_pid = 483
-        self.queue_size = 500
+        self.num_pid = 5532
+        self.queue_size = 5000
         self.lut_momentum = 0.5
         self.reid_feat_dim = 256
 
@@ -35,7 +35,9 @@ class SIPN(nn.Module):
         self.register_buffer('queue', torch.zeros(
             self.queue_size, self.reid_feat_dim).cuda())
 
-        if self.net_name == 'res50':
+        if self.net_name == 'res34':
+            self.net = resnet(34, pre_model, self.is_train)
+        elif self.net_name == 'res50':
             self.net = resnet(50, pre_model, self.is_train)
         elif self.net_name == 'dense121':
             self.net = densenet(121, pre_model, self.is_train)
@@ -61,12 +63,14 @@ class SIPN(nn.Module):
         if self.is_train:
             net_conv = self.head(im_data)
             # returned parameters contain 3 tuples here
-            pooled_feat, rpn_loss, label, bbox_info = self.strpn(
+            pooled_feat, trans_feat, rpn_loss, label, bbox_info = self.strpn(
                 net_conv, gt_boxes, im_info)
             fc7 = self.tail(pooled_feat).mean(3).mean(2)
             cls_score = self.cls_score_net(fc7)
             bbox_pred = self.bbox_pred_net(fc7)
-            reid_feat = F.normalize(self.reid_feat_net(fc7))
+
+            reid_fc7 = self.tail(trans_feat).mean(3).mean(2)
+            reid_feat = F.normalize(self.reid_feat_net(reid_fc7))
 
             cls_pred = torch.max(cls_score, 1)[1]
             cls_prob = F.softmax(cls_score)
@@ -75,9 +79,8 @@ class SIPN(nn.Module):
             det_label = det_label.view(-1)
             cls_loss = F.cross_entropy(cls_score.view(-1, 2), det_label)
             bbox_loss = smooth_l1_loss(bbox_pred, bbox_info)
-            reid_loss = oim_loss(reid_feat, pid_label, self.num_pid,
-                                 self.queue_size, self.lut,
-                                 self.queue, self.lut_momentum)
+            reid_loss = oim_loss(reid_feat, pid_label, self.lut, self.queue,
+                                 gt_boxes.size(0), self.lut_momentum)
             rpn_cls_loss, rpn_box_loss = rpn_loss
 
             return rpn_cls_loss, rpn_box_loss, cls_loss, bbox_loss, reid_loss
@@ -85,11 +88,14 @@ class SIPN(nn.Module):
         else:
             if mode == 'gallery':
                 net_conv = self.head(im_data)
-                rois, pooled_feat = self.strpn(net_conv, gt_boxes, im_info)
+                rois, pooled_feat, trans_feat = self.strpn(
+                    net_conv, gt_boxes, im_info)
                 fc7 = self.tail(pooled_feat).mean(3).mean(2)
                 cls_score = self.cls_score_net(fc7)
                 bbox_pred = self.bbox_pred_net(fc7)
-                reid_feat = F.normalize(self.reid_feat_net(fc7))
+
+                reid_fc7 = self.tail(trans_feat).mean(3).mean(2)
+                reid_feat = F.normalize(self.reid_feat_net(reid_fc7))
 
                 cls_pred = torch.max(cls_score, 1)[1]
                 cls_prob = F.softmax(cls_score)
