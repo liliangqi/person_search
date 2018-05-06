@@ -2,8 +2,8 @@
 # Demo Spatial Invariant Person Search Network
 #
 # Author: Liangqi Li
-# Creating Date: Mar 31, 2018
-# Latest rectified: Apr 9, 2018
+# Creating Date: Apr 26, 2018
+# Latest rectified: Apr 28, 2018
 # -----------------------------------------------------
 import os
 import argparse
@@ -14,7 +14,8 @@ import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 
-from dataset import PersonSearchDataset, pre_process_image
+from __init__ import clock_non_return
+from dataset import pre_process_image
 from model import SIPN
 from bbox_transform import bbox_transform_inv
 from nms.pth_nms import pth_nms as nms
@@ -27,7 +28,8 @@ def parse_args():
     parser.add_argument('--net', default='res50', type=str)
     parser.add_argument('--trained_epochs', default='10', type=str)
     parser.add_argument('--gpu_ids', default='0', type=str)
-    parser.add_argument('--data_dir', default='', type=str)
+    parser.add_argument('--data_dir', default='./demo', type=str)
+    parser.add_argument('--model_dir', default='./output', tpye=str)
 
     args = parser.parse_args()
 
@@ -84,7 +86,7 @@ def demo_detection(net, im_dir, images, use_cuda, thresh=.75):
         else:
             im = Variable(torch.from_numpy(im), volatile=True)
 
-        scores, bbox_pred, rois, features = net.forward(im, None, im_info)
+        scores, bbox_pred, rois, _ = net.forward(im, None, im_info)
 
         boxes = rois[:, 1:5] / im_info[2]
         scores = np.reshape(scores, [scores.shape[0], -1])
@@ -111,7 +113,6 @@ def demo_detection(net, im_dir, images, use_cuda, thresh=.75):
         keep = nms(torch.from_numpy(cls_dets),
                    config['test_nms']).numpy() if cls_dets.size > 0 else []
         cls_dets = cls_dets[keep, :]
-        features = features[inds][keep]
 
         if cls_dets is None:
             print('There are no detections in image {}'.format(im_name))
@@ -252,15 +253,16 @@ def demo_search(net, im_dir, images, use_cuda, thresh=.75):
         plt.close(fig)
 
 
-if __name__ == '__main__':
+@clock_non_return
+def main():
 
     opt = parse_args()
     use_cuda = cuda_mode(opt)
 
-    trained_model_dir = os.path.join('./output',
-                                     'sipn_' + opt.trained_epochs + '.pth')
+    trained_model_dir = os.path.join('./output', 'sipn_' + opt.net + '_' +
+                                     opt.trained_epochs + '.pth')
 
-    net = SIPN(opt.net, trained_model_dir, training=False)
+    net = SIPN(opt.net, trained_model_dir, is_train=False)
     net.eval()
     if use_cuda:
         net.cuda()
@@ -274,4 +276,7 @@ if __name__ == '__main__':
     # demo_detection(net, opt.data_dir, test_images, use_cuda)
     demo_search(net, opt.data_dir, test_images, use_cuda)
 
-    print('Done')
+
+if __name__ == '__main__':
+
+    main()
