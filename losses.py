@@ -29,11 +29,12 @@ def smooth_l1_loss(bbox_pred, bbox_info, sigma=1., dim=[1]):
 
 
 class OIM(Function):
-    def __init__(self, lut, queue, momentum):
+    def __init__(self, lut, queue, num_gt, momentum):
         super(OIM, self).__init__()
         self.lut = lut
         self.queue = queue
         self.momentum = momentum  # TODO: use exponentially weighted average
+        self.num_gt = num_gt
 
     def forward(self, inputs, targets):
         self.save_for_backward(inputs, targets)
@@ -52,25 +53,27 @@ class OIM(Function):
                 tmp = torch.cat((self.queue[1:], x.view(1, -1)), 0)
                 self.queue[:, :] = tmp[:, :]
             elif y < len(self.lut):
-                self.lut[y] = self.momentum * self.lut[y] + \
-                              (1. - self.momentum) * x
-                self.lut[y] /= self.lut[y].norm()
+                if i < self.num_gt:
+                    self.lut[y] = self.momentum * self.lut[y] + \
+                                  (1. - self.momentum) * x
+                    self.lut[y] /= self.lut[y].norm()
             else:
                 continue
 
         return grad_inputs, None
 
 
-def oim_loss(reid_feat, aux_label, num_pid, q_size, lut, queue, momentum=0.5):
+def oim_loss(reid_feat, aux_label, lut, queue, num_gt, momentum=0.5):
+    num_pid = lut.size(0)
     aux_label_np = aux_label.data.cpu().numpy()
     invalid_inds = np.where((aux_label_np < 0) | (aux_label_np >= num_pid))
     aux_label_np[invalid_inds] = -1
     pid_label = Variable(torch.from_numpy(aux_label_np).long().cuda()).view(-1)
     aux_label = aux_label.view(-1)
 
-    reid_result = OIM(lut, queue, momentum)(reid_feat, aux_label)
+    reid_result = OIM(lut, queue, num_gt, momentum)(reid_feat, aux_label)
     reid_loss_weight = torch.cat([torch.ones(num_pid).cuda(),
-                                  torch.zeros(q_size).cuda()])
+                                  torch.zeros(queue.size(0)).cuda()])
     scalar = 10
     reid_loss = F.cross_entropy(reid_result * scalar, pid_label,
                                 weight=reid_loss_weight, ignore_index=-1)
