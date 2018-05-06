@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 16, 2018
-# Latest rectifying: Apr 28, 2018
+# Latest rectifying: May 6, 2018
 # -----------------------------------------------------------
 
 import os
@@ -308,20 +308,30 @@ def produce_query_set(root_dir):
     q_names = []
     q_boxes = np.zeros((1, 4), dtype=np.int32)
     pids = []
+    queries_num_g = []
 
     for index, item in enumerate(test):
         q_name = str(item['Query'][0, 0][0][0])
+        gallery = item['Gallery'].squeeze()
         q_names.append(q_name)
         q_box = item['Query'][0, 0][1].squeeze().astype(np.int32)
         q_boxes = np.vstack((q_boxes, q_box))
         pids.append(index)
+        num_g = 0
+        for g_name, bbox, _ in gallery:
+            if bbox.size > 0:
+                num_g += 1
+            else:
+                break
+        queries_num_g.append(num_g)
 
     # Indicate hte order of column names
-    ordered_columns = ['imname', 'x1', 'y1', 'del_x', 'del_y', 'pid']
+    ordered_columns = ['imname', 'x1', 'y1', 'del_x', 'del_y', 'pid', 'num_g']
     q_boxes = q_boxes[1:]
     q_boxes_df = pd.DataFrame(q_boxes, columns=['x1', 'y1', 'del_x', 'del_y'])
     q_boxes_df['imname'] = q_names
     q_boxes_df['pid'] = pids
+    q_boxes_df['num_g'] = queries_num_g
     q_boxes_df = q_boxes_df[ordered_columns]
 
     q_boxes_df.to_csv(osp.join(root_dir, 'queryDF.csv'), index=False)
