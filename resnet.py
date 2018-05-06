@@ -3,12 +3,10 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectifying: Apr 13, 2018
+# Latest rectifying: May 6, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
 import math
 import torch.utils.model_zoo as model_zoo
 
@@ -122,7 +120,7 @@ class ResNet(nn.Module):
         self.layer3 = self._make_layer(block, 256, layers[2], stride=2)
         # use stride 1 for the last conv4 layer (same as tf-faster-rcnn)
         self.layer4 = self._make_layer(block, 512, layers[3], stride=1)
-        # self.fc = nn.Linear(512 * block.expansion, num_classes)
+        self.fc = nn.Linear(512 * block.expansion, num_classes)
 
         for m in self.modules():
             if isinstance(m, nn.Conv2d):
@@ -208,11 +206,19 @@ def resnet152(pretrained=False):
 class resnet:
 
     def __init__(self, num_layers=50, pre_model=None, training=True):
-        self.net_conv_channels = 1024
-        self.fc7_channels = 2048
         self.training = training
 
-        if num_layers == 50:
+        if num_layers == 34:
+            self.net_conv_channels = 256
+            self.fc7_channels = 512
+            if self.training:
+                self.model = resnet34(True)
+            else:
+                self.model = resnet34()
+
+        elif num_layers == 50:
+            self.net_conv_channels = 1024
+            self.fc7_channels = 2048
             if self.training:
                 if pre_model:
                     self.model = resnet50()
