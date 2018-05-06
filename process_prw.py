@@ -3,10 +3,11 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 26, 2018
-# Latest rectifying: Apr 28, 2018
+# Latest rectifying: May 6, 2018
 # ----------------------------------------------------------
 import os
 import random
+from collections import Counter
 
 import numpy as np
 import pandas as pd
@@ -161,9 +162,10 @@ def produce_query_set(root_dir):
 
     test_ids = sio.loadmat(os.path.join(
         root_dir, 'ID_test.mat'))['ID_test2'].squeeze()
+    test_boxes_df = pd.read_csv(os.path.join(root_dir, 'testAllDF.csv'))
     test_dict = {id_num: i for i, id_num in enumerate(test_ids)}
 
-    query_imnames = []  # TODO: change is_query in dataset.py
+    query_imnames = []
     query_boxes = np.zeros((1, 5), dtype=np.int32)
 
     with open(os.path.join(root_dir, 'query_info.txt')) as f:
@@ -186,6 +188,26 @@ def produce_query_set(root_dir):
     for i in range(query_boxes_df.shape[0]):
         query_boxes_df.ix[i, 'pid'] = test_dict[query_boxes_df.ix[i, 'pid']]
 
+    # Add quantity of galleries for every query
+    queries_num_g = []
+    for i in range(query_boxes_df.shape[0]):
+        q_name = query_boxes_df.iloc[i]['imname']
+        q_camera = q_name[1]
+        pid = query_boxes_df.iloc[i]['pid']
+        df = test_boxes_df[test_boxes_df['pid'] == pid]
+        num_g = 0
+
+        # gt_gallery refers to those images that contain the `pid` person
+        gt_gallery = list(set(df['imname']))
+        gt_gallery.remove(q_name)
+        for gt_im in gt_gallery:
+            # Only pick out images under different cameras with query
+            if gt_im[1] != q_camera:
+                num_g += 1
+        queries_num_g.append(num_g)
+
+    query_boxes_df['num_g'] = queries_num_g
+
     query_boxes_df.to_csv(os.path.join(root_dir, 'queryDF.csv'), index=False)
 
 
@@ -206,7 +228,7 @@ def produce_query_gallery(root_dir):
         id_appearence[id_num] = num_boxes
 
     # get gallery sizes
-    chosen_sizes = [50, 100, 200, 500, 1000, 2000, 4000]
+    chosen_sizes = [50, 100, 200, 500, 1000, 1500, 2000, 4000]
     gallery_sizes = [size for size in chosen_sizes
                      if size > max(id_appearence.values())]
 
@@ -244,6 +266,34 @@ def main():
     # fix_train_test(root_dir)
     # produce_query_set(root_dir)
     produce_query_gallery(root_dir)
+
+    # test_all = pd.read_csv(os.path.join(root_dir, 'testAllDF.csv'))
+    # test_imnames = pd.read_csv(os.path.join(root_dir, 'testImnamesSe.csv'),
+    #                            header=None, squeeze=True)
+    # exception_test_image = []
+    # for im_name in test_imnames:
+    #     im_df = test_all[test_all['imname'] == im_name]
+    #     counter = Counter(im_df['pid'])
+    #     for id in counter.keys():
+    #         if id > -1 and counter[id] > 1:
+    #             exception_test_image.append(im_name)
+
+    train_imnames = pd.read_csv(os.path.join(root_dir, 'trainImnamesSe.csv'),
+                                header=None, squeeze=True)
+    train_all = pd.read_csv(os.path.join(root_dir, 'trainAllDF.csv'))
+    # exception_train_image = []
+    # for im_name in train_imnames:
+    #     im_df = train_all[train_all['imname'] == im_name]
+    #     counter = Counter(im_df['pid'])
+    #     for id in counter.keys():
+    #         if id > -1 and counter[id] > 1:
+    #             exception_train_image.append(im_name)
+    train_dict = {}
+    for im_name in train_imnames:
+        df = train_all[train_all['imname'] == im_name]
+        train_dict[im_name] = len(set(df['pid']))
+
+    print('Done')
 
 if __name__ == '__main__':
 
