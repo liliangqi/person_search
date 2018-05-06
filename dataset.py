@@ -247,7 +247,7 @@ class PersonSearchDataset:
                 im_info = np.array([im.shape[1], im.shape[2], im_scale],
                                    dtype=np.float32)
 
-                return im, im_info, orig_shape, im_path
+                return im, im_info, orig_shape
 
             elif self.test_mode == 'query':
                 chosen = self.query_imnames_list.pop()
@@ -372,7 +372,8 @@ class PersonSearchDataset:
         topk = [1, 5, 10]
         # ret  # TODO: save json
         for i in range(len(probe_feat)):
-            pid = i
+            pid = self.query_boxes.ix[i, 'pid']
+            num_g = self.query_boxes.ix[i, 'num_g']
             y_true, y_score = [], []
             imgs, rois = [], []
             count_gt, count_tp = 0, 0
@@ -393,8 +394,11 @@ class PersonSearchDataset:
                 # gt = df[df['imname'] == gallery_imname]
                 # gt = gt[gt['pid'] == pid]  # important
                 # gt = gt.loc[:, 'x1': 'y2']
-                gt = df.query('imname==@gallery_imname and pid==@pid')
-                gt = gt.loc[:, 'x1': 'y2'].as_matrix().ravel()
+                if g_i <= num_g:
+                    gt = df.query('imname==@gallery_imname and pid==@pid')
+                    gt = gt.loc[:, 'x1': 'y2'].as_matrix().ravel()
+                else:
+                    gt = np.array([])
                 count_gt += (gt.size > 0)
                 # compute distance between probe and gallery dets
                 if gallery_imname not in name_to_det_feat: continue
