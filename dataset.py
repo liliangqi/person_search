@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 28, 2018
-# Latest rectified: Apr 28, 2018
+# Latest rectified: May 11, 2018
 # -----------------------------------------------------
 
 import os
@@ -64,8 +64,8 @@ def pre_process_image(im_path, flipped=0, copy=False):
 
 class PersonSearchDataset:
 
-    def __init__(self, root_dir, split_name='train', gallery_size=100,
-                 test_mode='gallery'):
+    def __init__(self, root_dir, dataset_name, split_name='train',
+                 gallery_size=100, test_mode='gallery'):
         """
         create person search dataset
         ---
@@ -74,6 +74,7 @@ class PersonSearchDataset:
             split_name: 'train' or 'test'
         """
         self.root_dir = root_dir
+        self.dataset_name = dataset_name
         self.split = split_name
         self.images_dir = osp.join(self.root_dir, 'Image/SSM')
         self.annotation_dir = osp.join(self.root_dir, 'annotation')
@@ -85,7 +86,14 @@ class PersonSearchDataset:
         self.train_all_file = 'trainAllDF.csv'
         self.test_all_file = 'testAllDF.csv'
         self.query_file = 'queryDF.csv'
-        self.gallery_sizes = [50, 100, 500, 1000, 2000, 4000]
+        if self.dataset_name == 'sysu':
+            self.gallery_sizes = [50, 100, 500, 1000, 2000, 4000]
+            self.num_pid = 5532
+        elif self.dataset_name == 'prw':
+            self.gallery_sizes = [200, 500, 1000, 2000, 4000]
+            self.num_pid = 483
+        else:
+            raise KeyError(self.dataset_name)
 
         if not osp.exists(self.cache_dir):
             os.mkdir(self.cache_dir)
@@ -118,9 +126,7 @@ class PersonSearchDataset:
             self.delta_to_coordinates()
             self.num_test_images = self.test_imnames.shape[0]
             self.test_imnames_list = list(range(self.num_test_images))[::-1]
-            # random.shuffle(self.test_imnames_list)
 
-            # TODO: split query and gallery completely
             self.test_mode = test_mode
             if self.test_mode == 'query':
                 self.query_imnames_list = list(range(
