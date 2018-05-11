@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 26, 2018
-# Latest rectified: Apr 28, 2018
+# Latest rectified: May 11, 2018
 # -----------------------------------------------------
 import os
 import argparse
@@ -29,7 +29,8 @@ def parse_args():
     parser.add_argument('--trained_epochs', default='10', type=str)
     parser.add_argument('--gpu_ids', default='0', type=str)
     parser.add_argument('--data_dir', default='./demo', type=str)
-    parser.add_argument('--model_dir', default='./output', tpye=str)
+    parser.add_argument('--model_dir', default='./output', type=str)
+    parser.add_argument('--dataset_name', default='sysu', type=str)
 
     args = parser.parse_args()
 
@@ -259,10 +260,11 @@ def main():
     opt = parse_args()
     use_cuda = cuda_mode(opt)
 
-    trained_model_dir = os.path.join('./output', 'sipn_' + opt.net + '_' +
-                                     opt.trained_epochs + '.pth')
+    trained_model_dir = os.path.join(
+        opt.model_dir, opt.dataset_name, 'sipn_' + opt.net + '_' +
+                                         opt.trained_epochs + '.pth')
 
-    net = SIPN(opt.net, trained_model_dir, is_train=False)
+    net = SIPN(opt.net, opt.dataset_name, trained_model_dir, is_train=False)
     net.eval()
     if use_cuda:
         net.cuda()
