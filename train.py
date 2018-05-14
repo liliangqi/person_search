@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 31, 2018
-# Latest rectified: Apr 14, 2018
+# Latest rectified: May 11, 2018
 # -----------------------------------------------------
 import os
 import argparse
@@ -30,6 +30,9 @@ def parse_args():
     parser.add_argument('--optimizer', default='SGD', type=str)
     parser.add_argument('--out_dir', default='./output', type=str)
     parser.add_argument('--pre_model', default='', type=str)
+    parser.add_argument('--resume', default=0, type=int)
+    parser.add_argument('--dataset_name', default='sysu', type=str)
+
 
     args = parser.parse_args()
 
@@ -55,7 +58,8 @@ def cuda_mode(args):
     return cuda
 
 
-def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir):
+def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir,
+                resume_epoch):
     """Train the model"""
 
     all_epoch_loss = 0
@@ -68,7 +72,7 @@ def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir):
     with open('config.yml', 'r') as f:
         config = yaml.load(f)
 
-    for epoch in range(num_epochs):
+    for epoch in range(resume_epoch, num_epochs):
         epoch_start = time.time()
         if epoch in [2, 4]:
             lr *= config['gamma']  # TODO: use lr_scheduel
@@ -123,15 +127,26 @@ def main():
 
     opt = parse_args()
     use_cuda = cuda_mode(opt)
-    model = SIPN(opt.net, opt.pre_model)
 
-    # Load the dataset
-    dataset = PersonSearchDataset(opt.data_dir)
-
-    save_dir = opt.out_dir
+    save_dir = os.path.join(opt.out_dir, opt.dataset_name)
     print('Trained models will be save to', os.path.abspath(save_dir))
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
+
+    pre_model = opt.pre_model
+    if opt.resume != 0:
+        pre_model = ''
+
+    model = SIPN(opt.net, opt.dataset_name, pre_model)
+
+    if opt.resume:
+        resume = os.path.join(save_dir, 'sipn_' + opt.net + '_' +
+                              str(opt.resume) + '.pth')
+        print('Resuming model check point from {}'.format(resume))
+        model.load_trained_model(torch.load(resume))
+
+    # Load the dataset
+    dataset = PersonSearchDataset(opt.data_dir, opt.dataset_name)
 
     # Choose parameters to be updated during training
     lr = opt.lr
@@ -146,15 +161,14 @@ def main():
     if opt.optimizer == 'SGD':
         optimizer = torch.optim.SGD(params, momentum=0.9)
     elif opt.optimizer == 'Adam':
-        lr *= 0.1
+        # lr *= 0.1
         optimizer = torch.optim.Adam(params)
     else:
         raise KeyError(opt.optimizer)
 
-    # TODO: add resume
-
     # Train the model
-    train_model(dataset, model, lr, optimizer, opt.epochs, use_cuda, save_dir)
+    train_model(dataset, model, lr, optimizer, opt.epochs, use_cuda, save_dir,
+                opt.resume)
 
     print('Done.\n')
 
