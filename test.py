@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 10, 2018
-# Latest rectified: Apr 14, 2018
+# Latest rectified: May 11, 2018
 # -----------------------------------------------------
 import os
 import argparse
@@ -25,13 +25,15 @@ from __init__ import clock_non_return
 def parse_args():
     """Parse input arguments"""
 
-    parser = argparse.ArgumentParser(description='Training')
+    parser = argparse.ArgumentParser(description='Testing')
     parser.add_argument('--net', default='res50', type=str)
     parser.add_argument('--trained_epochs', default='10', type=str)
     parser.add_argument('--gpu_ids', default='0', type=str)
     parser.add_argument('--data_dir', default='', type=str)
     parser.add_argument('--out_dir', default='./output', type=str)
     parser.add_argument('--use_saved_result', default=0, type=int)
+    parser.add_argument('--dataset_name', default='sysu', type=str)
+    parser.add_argument('--gallery_size', default=500, type=int)
 
     args = parser.parse_args()
 
@@ -70,7 +72,7 @@ def clip_boxes(boxes, im_shape):
     return boxes
 
 
-def test_gallery(net, dataset, use_cuda, output_dir, thresh=0.5):
+def test_gallery(net, dataset, use_cuda, output_dir, thresh=0.):
     """test gallery images"""
 
     with open('config.yml', 'r') as f:
@@ -82,7 +84,7 @@ def test_gallery(net, dataset, use_cuda, output_dir, thresh=0.5):
     start = time.time()
 
     for i in range(num_images):
-        im, im_info, orig_shape, _ = dataset.next()
+        im, im_info, orig_shape = dataset.next()
         im = im.transpose([0, 3, 1, 2])
 
         if use_cuda:
@@ -175,10 +177,12 @@ def main():
     """Test the model"""
 
     opt = parse_args()
-    test_result_dir = os.path.join(opt.out_dir, 'test_result')
+    size = opt.gallery_size
+    test_result_dir = os.path.join(opt.out_dir, opt.dataset_name,
+                                   'test_result')
 
-    dataset_gallery = PersonSearchDataset(opt.data_dir, split_name='test',
-                                          gallery_size=200)
+    dataset_gallery = PersonSearchDataset(opt.data_dir, opt.dataset_name,
+                                          split_name='test', gallery_size=size)
 
     if opt.use_saved_result:
         gboxes_file = open(os.path.join(test_result_dir, 'gboxes.pkl'), 'rb')
@@ -193,13 +197,15 @@ def main():
     else:
         use_cuda = cuda_mode(opt)
 
-        trained_model_dir = os.path.join('./output', 'sipn_' + opt.net + '_' +
-                                         opt.trained_epochs + '.pth')
+        trained_model_dir = os.path.join(
+            opt.out_dir, opt.dataset_name, 'sipn_' + opt.net + '_' +
+                                           opt.trained_epochs + '.pth')
 
         if not os.path.exists(test_result_dir):
             os.makedirs(test_result_dir)
 
-        net = SIPN(opt.net, trained_model_dir, is_train=False)
+        net = SIPN(opt.net, opt.dataset_name, trained_model_dir,
+                   is_train=False)
         net.eval()
         if use_cuda:
             net.cuda()
@@ -208,17 +214,17 @@ def main():
         print('Loading model check point from {:s}'.format(trained_model_dir))
         net.load_trained_model(torch.load(trained_model_dir))
 
-        dataset_query = PersonSearchDataset(opt.data_dir, split_name='test',
-                                            gallery_size=200,
-                                            test_mode='query')
+        dataset_query = PersonSearchDataset(
+            opt.data_dir, opt.dataset_name, split_name='test',
+            gallery_size=size, test_mode='query')
 
         g_boxes, g_features = test_gallery(net, dataset_gallery, use_cuda,
-                                           test_result_dir)
+                                            test_result_dir)
         q_features = test_query(net, dataset_query, use_cuda, test_result_dir)
 
-    # dataset_gallery.evaluate_detections(g_boxes, det_thresh=0.5)
+    dataset_gallery.evaluate_detections(g_boxes, det_thresh=0.5)
     dataset_gallery.evaluate_search(g_boxes, g_features, q_features,
-                                    det_thresh=0.5, gallery_size=200,
+                                    det_thresh=0.5, gallery_size=size,
                                     dump_json=None)
 
 
