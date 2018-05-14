@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectified: Apr 10, 2018
+# Latest rectified: May 11, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -11,6 +11,7 @@ from torch.autograd import Variable
 import torch.nn.functional as F
 import yaml
 
+from vgg16 import Vgg16
 from resnet import resnet
 from densenet import densenet
 from strpn import STRPN
@@ -19,14 +20,19 @@ from losses import oim_loss, smooth_l1_loss
 
 class SIPN(nn.Module):
 
-    def __init__(self, net_name, pre_model=None, is_train=True):
+    def __init__(self, net_name, dataset_name, pre_model=None, is_train=True):
         super().__init__()
         self.net_name = net_name
         self.is_train = is_train
 
-        # TODO: set depending on dataset
-        self.num_pid = 5532
-        self.queue_size = 5000
+        if dataset_name == 'sysu':
+            self.num_pid = 5532
+            self.queue_size = 5000
+        elif dataset_name == 'prw':
+            self.num_pid = 483
+            self.queue_size = 500
+        else:
+            raise KeyError(dataset_name)
         self.lut_momentum = 0.5
         self.reid_feat_dim = 256
 
@@ -35,7 +41,9 @@ class SIPN(nn.Module):
         self.register_buffer('queue', torch.zeros(
             self.queue_size, self.reid_feat_dim).cuda())
 
-        if self.net_name == 'res34':
+        if self.net_name == 'vgg16':
+            self.net = Vgg16(pre_model, self.is_train)
+        elif self.net_name == 'res34':
             self.net = resnet(34, pre_model, self.is_train)
         elif self.net_name == 'res50':
             self.net = resnet(50, pre_model, self.is_train)
@@ -65,15 +73,20 @@ class SIPN(nn.Module):
             # returned parameters contain 3 tuples here
             pooled_feat, trans_feat, rpn_loss, label, bbox_info = self.strpn(
                 net_conv, gt_boxes, im_info)
-            fc7 = self.tail(pooled_feat).mean(3).mean(2)
+            if self.net_name == 'vgg16':
+                pooled_feat = pooled_feat.view(pooled_feat.size(0), -1)
+                fc7 = self.tail(pooled_feat)
+            else:
+                fc7 = self.tail(pooled_feat).mean(3).mean(2)
             cls_score = self.cls_score_net(fc7)
             bbox_pred = self.bbox_pred_net(fc7)
 
             reid_fc7 = self.tail(trans_feat).mean(3).mean(2)
             reid_feat = F.normalize(self.reid_feat_net(reid_fc7))
+            # reid_feat = F.normalize(self.reid_feat_net(fc7))
 
             cls_pred = torch.max(cls_score, 1)[1]
-            cls_prob = F.softmax(cls_score)
+            cls_prob = F.softmax(cls_score, 1)
             det_label, pid_label = label
 
             det_label = det_label.view(-1)
@@ -90,15 +103,20 @@ class SIPN(nn.Module):
                 net_conv = self.head(im_data)
                 rois, pooled_feat, trans_feat = self.strpn(
                     net_conv, gt_boxes, im_info)
-                fc7 = self.tail(pooled_feat).mean(3).mean(2)
+                if self.net_name == 'vgg16':
+                    pooled_feat = pooled_feat.view(pooled_feat.size(0), -1)
+                    fc7 = self.tail(pooled_feat)
+                else:
+                    fc7 = self.tail(pooled_feat).mean(3).mean(2)
                 cls_score = self.cls_score_net(fc7)
                 bbox_pred = self.bbox_pred_net(fc7)
 
                 reid_fc7 = self.tail(trans_feat).mean(3).mean(2)
                 reid_feat = F.normalize(self.reid_feat_net(reid_fc7))
+                # reid_feat = F.normalize(self.reid_feat_net(fc7))
 
                 cls_pred = torch.max(cls_score, 1)[1]
-                cls_prob = F.softmax(cls_score)
+                cls_prob = F.softmax(cls_score, 1)
 
                 with open('config.yml', 'r') as f:
                     config = yaml.load(f)
@@ -121,7 +139,11 @@ class SIPN(nn.Module):
                 net_conv = self.head(im_data)
                 # TODO: move pooling layer from strpn to SIPN
                 pooled_feat = self.strpn(net_conv, gt_boxes, im_info, mode)
-                fc7 = self.tail(pooled_feat).mean(3).mean(2)
+                if self.net_name == 'vgg16':
+                    pooled_feat = pooled_feat.view(pooled_feat.size(0), -1)
+                    fc7 = self.tail(pooled_feat)
+                else:
+                    fc7 = self.tail(pooled_feat).mean(3).mean(2)
                 reid_feat = F.normalize(self.reid_feat_net(fc7))
 
                 return reid_feat.data.cpu().numpy()
