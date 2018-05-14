@@ -215,7 +215,6 @@ class resnet:
                 self.model = resnet34(True)
             else:
                 self.model = resnet34()
-
         elif num_layers == 50:
             self.net_conv_channels = 1024
             self.fc7_channels = 2048
@@ -227,7 +226,7 @@ class resnet:
                         {k: state_dict[k] for k in list(
                             self.model.state_dict())})
                 else:
-                    raise NotImplementedError('model does not match')
+                    self.model = resnet50(True)
             else:
                 self.model = resnet50()
         else:
