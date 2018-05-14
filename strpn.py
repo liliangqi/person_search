@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 2, 2018
-# Latest rectified: Apr 9, 2018
+# Latest rectified: May 11, 2018
 # -----------------------------------------------------
 import yaml
 
@@ -53,13 +53,15 @@ class STRPN(nn.Module):
             self.rpn_channels, self.num_anchors * 2, 1)
         self.rpn_bbox_pred_net = nn.Conv2d(
             self.rpn_channels, self.num_anchors * 4, 1)
+        self.rpn_transform_net = nn.Conv2d(
+            self.rpn_channels, self.num_anchors * 6, 1)
 
         self.initialize_weight(False)
 
     def forward(self, head_features, gt_boxes, im_info, mode='gallery'):
         if self.is_train:
-            rois, rpn_info, label, bbox_info = self.region_proposal(
-                head_features, gt_boxes, im_info)
+            rois, rpn_info, label, bbox_info, roi_trans_param = \
+                self.region_proposal(head_features, gt_boxes, im_info)
             rpn_label, rpn_bbox_info, rpn_cls_score, rpn_bbox_pred = rpn_info
 
             rpn_cls_score = rpn_cls_score.view(-1, 2)
@@ -75,35 +77,49 @@ class STRPN(nn.Module):
                                           sigma=3.0, dim=[1, 2, 3])
             rpn_loss = (rpn_cls_loss, rpn_box_loss)
 
-            # add roi-pooling
+            # Roi-pooling (unable to work now)
             # pooled_feat = self.roi_pool(head_features, rois)
 
-            # crop and resize
+            # Crop and resize
             pooled_feat = self.pooling(head_features, rois, max_pool=False)
+            transformed_feat = self.spatial_transform(pooled_feat,
+                                                      roi_trans_param)
 
-            return pooled_feat, rpn_loss, label, bbox_info
+            return pooled_feat, transformed_feat, rpn_loss, label, bbox_info
 
         else:
             if mode == 'gallery':
-                rois = self.region_proposal(head_features, gt_boxes, im_info)
+                rois, roi_trans_param = self.region_proposal(
+                    head_features, gt_boxes, im_info)
 
-                # add roi-pooling
+                # Roi-pooling (unable to work now)
                 # pooled_feat = self.roi_pool(head_features, rois)
 
-                # crop and resize
+                # Crop and resize
                 pooled_feat = self.pooling(head_features, rois, max_pool=False)
-
-                return rois, pooled_feat
+                transformed_feat = self.spatial_transform(pooled_feat,
+                                                          roi_trans_param)
+                return rois, pooled_feat, transformed_feat
 
             elif mode == 'query':
-                # roi-pooling
-                # pooled_feat = self.roi_pool(head_features, gt_boxes)
-                # crop and resize
+                # TODO: whether to transform query
+                # Roi-pooling (unable to work now)
+                # pooled_feat = self.roi_pool(head_features, rois)
+
+                # Crop and resize
                 pooled_feat = self.pooling(head_features, gt_boxes, False)
                 return pooled_feat
 
             else:
                 raise KeyError(mode)
+
+    def spatial_transform(self, bottom, trans_param):
+        theta = trans_param.view(-1, 2, 3)
+        # TODO: use different pooling size
+        grid = F.affine_grid(theta, bottom.size())
+        transformed = F.grid_sample(bottom, grid)
+
+        return transformed
 
     def pooling(self, bottom, rois, max_pool=True):
         rois = rois.detach()
@@ -164,33 +180,41 @@ class STRPN(nn.Module):
         rpn_cls_score = self.rpn_cls_score_net(rpn)
         rpn_cls_score_reshape = rpn_cls_score.view(
             1, 2, -1, rpn_cls_score.size()[-1])
-        rpn_cls_prob_reshape = F.softmax(rpn_cls_score_reshape)  # TODO: dim
+        rpn_cls_prob_reshape = F.softmax(rpn_cls_score_reshape, 1)
         rpn_cls_prob = rpn_cls_prob_reshape.view_as(rpn_cls_score).permute(
             0, 2, 3, 1)
         rpn_cls_score = rpn_cls_score.permute(0, 2, 3, 1)
         rpn_cls_score_reshape = rpn_cls_score_reshape.permute(
             0, 2, 3, 1).contiguous()
         rpn_cls_pred = torch.max(rpn_cls_score_reshape.view(-1, 2), 1)[1]
+
         rpn_bbox_pred = self.rpn_bbox_pred_net(rpn)
         rpn_bbox_pred = rpn_bbox_pred.permute(0, 2, 3, 1).contiguous()
 
+        rpn_trans_param = self.rpn_transform_net(rpn)
+        rpn_trans_param = rpn_trans_param.permute(
+            0, 2, 3, 1).contiguous()
+
         if self.is_train:
-            rois, roi_scores = self.proposal_layer(rpn_cls_prob, rpn_bbox_pred,
-                                                   im_info)
+            rois, roi_scores, roi_trans_param = self.proposal_layer(
+                rpn_cls_prob, rpn_bbox_pred, rpn_trans_param, im_info)
             rpn_labels, rpn_bbox_info = self.anchor_target_layer(
                 rpn_cls_score, gt_boxes, im_info)
-            rois, label, bbox_info = self.proposal_target_layer(
-                rois, roi_scores, gt_boxes)
+            rois, label, roi_trans_param, bbox_info = \
+                self.proposal_target_layer(rois, roi_scores, roi_trans_param,
+                                           gt_boxes)
 
             rpn_info = (rpn_labels, rpn_bbox_info, rpn_cls_score_reshape,
                         rpn_bbox_pred)
 
-            return rois, rpn_info, label, bbox_info
+            return rois, rpn_info, label, bbox_info, roi_trans_param
         else:
-            rois, _ = self.proposal_layer(rpn_cls_prob, rpn_bbox_pred, im_info)
-            return rois
+            rois, _, roi_trans_param = self.proposal_layer(
+                rpn_cls_prob, rpn_bbox_pred, rpn_trans_param, im_info)
+            return rois, roi_trans_param
 
-    def proposal_layer(self, rpn_cls_prob, rpn_bbox_pred, im_info):
+    def proposal_layer(self, rpn_cls_prob, rpn_bbox_pred, rpn_trans_param,
+                       im_info):
         if self.is_train:
             pre_nms_top_n = self.config['train_rpn_pre_nms_top_n']
             post_nms_top_n = self.config['train_rpn_post_nms_top_n']
@@ -204,6 +228,8 @@ class STRPN(nn.Module):
         scores = rpn_cls_prob[:, :, :, self.num_anchors:]
         rpn_bbox_pred = rpn_bbox_pred.view((-1, 4))
         scores = scores.contiguous().view(-1, 1)
+        rpn_trans_param = rpn_trans_param.view((-1, 6))
+
         proposals = bbox_transform_inv(self.anchors, rpn_bbox_pred)
         proposals = clip_boxes(proposals, im_info[:2])
 
@@ -213,6 +239,7 @@ class STRPN(nn.Module):
             order = order[:pre_nms_top_n]
             scores = scores[:pre_nms_top_n].view(-1, 1)
         proposals = proposals[order.data, :]
+        trans_param = rpn_trans_param[order.data, :]
 
         # Non-maximal suppression
         keep = nms(torch.cat((proposals, scores), 1).data, nms_thresh)
@@ -222,13 +249,14 @@ class STRPN(nn.Module):
             keep = keep[:post_nms_top_n]
         proposals = proposals[keep, :]
         scores = scores[keep,]
+        trans_param = trans_param[keep, :]
 
         # Only support single image as input
         batch_inds = Variable(
             proposals.data.new(proposals.size(0), 1).zero_())
         blob = torch.cat((batch_inds, proposals), 1)
 
-        return blob, scores
+        return blob, scores, trans_param
 
     def anchor_target_layer(self, rpn_cls_score, gt_boxes, im_info):
 
@@ -388,7 +416,8 @@ class STRPN(nn.Module):
         return rpn_labels, (rpn_bbox_targets, rpn_bbox_inside_weights,
                             rpn_bbox_outside_weights)
 
-    def proposal_target_layer(self, rpn_rois, rpn_scores, gt_boxes):
+    def proposal_target_layer(self, rpn_rois, rpn_scores, trans_param,
+                              gt_boxes):
         """
         Assign object detection proposals to ground-truth targets. Produces
         proposal classification labels and bounding-box regression targets.
@@ -444,7 +473,7 @@ class STRPN(nn.Module):
                 targets = ((targets - targets.new(means)) / targets.new(stds))
             return torch.cat([label.unsqueeze(1), targets], 1)
 
-        def _sample_rois(al_rois, al_scores, gt_box, fg_rois_per_im,
+        def _sample_rois(al_rois, al_scores, tr_param, gt_box, fg_rois_per_im,
                          rois_per_im, num_classes, num_pid):
             """Generate a random sample of RoIs comprising foreground and
             background examples.
@@ -493,7 +522,7 @@ class STRPN(nn.Module):
                     lab_inds = (gt_box[:, 5] != -1).nonzero().squeeze().data
                     if -1 in gt_box[:, 5].data:
                         unlab_inds = (gt_box[:, 5] == -1).nonzero().squeeze(
-                            ).data
+                        ).data
                         fg_inds = torch.cat((lab_inds, torch.from_numpy(
                             npr.choice(unlab_inds.cpu().numpy(),
                                        size=fg_rois_per_im - lab_inds.numel(),
@@ -501,7 +530,7 @@ class STRPN(nn.Module):
                     else:
                         fg_inds = lab_inds
 
-                # # =================origin==========================
+                # # ======================original========================
                 # fg_inds = fg_inds[torch.from_numpy(
                 #     npr.choice(np.arange(0, fg_inds.numel()),
                 #                size=int(fg_rois_per_im),
@@ -546,6 +575,8 @@ class STRPN(nn.Module):
             # size=int(bg_rois_per_this_image), replace=False)).long().cuda()]
 
             # The indices that we're selecting (both fg and bg)
+            if not isinstance(fg_inds, torch.cuda.LongTensor):
+                print(fg_inds, type(fg_inds))
             keep_inds = torch.cat([fg_inds, bg_inds], 0)
             # Select sampled values from various arrays:
             label = label[keep_inds].contiguous()
@@ -553,6 +584,7 @@ class STRPN(nn.Module):
             label[int(fg_rois_per_im):] = 0
             roi = al_rois[keep_inds].contiguous()
             roi_score = al_scores[keep_inds].contiguous()
+            tr_param = tr_param[keep_inds].contiguous()
 
             p_label = None
             if gt_box.size(1) > 5:
@@ -567,20 +599,28 @@ class STRPN(nn.Module):
             bbox_tar, bbox_in_weights = _get_bbox_regression_labels(
                 bbox_target_data, num_classes)
 
-            return label, roi, roi_score, bbox_tar, bbox_in_weights, p_label
+            return label, roi, roi_score, bbox_tar, bbox_in_weights, p_label, \
+                   tr_param
+
+        # ##################################################################
+        # ========================Begin this method=========================
+        # ##################################################################
 
         _num_classes = 2
         all_rois = rpn_rois
         all_scores = rpn_scores
 
         # Include ground-truth boxes in the set of candidate rois
-        # if cfg.TRAIN.USE_GT:
         zeros = rpn_rois.data.new(gt_boxes.size(0), 1)
         all_rois = torch.cat(
             (Variable(torch.cat((zeros, gt_boxes.data[:, :4]), 1)),
              all_rois), 0)
         # this may be a mistake, but all_scores is redundant anyway
         all_scores = torch.cat((all_scores, Variable(zeros)), 0)
+        gt_trans_param = torch.FloatTensor([1, 0, 0, 0, 1, 0])
+        gt_trans_param = gt_trans_param.expand(gt_boxes.size(0), 6)
+        trans_param = torch.cat(
+            (Variable(gt_trans_param).cuda(), trans_param), 0)
 
         num_images = 1
         rois_per_image = self.config['train_batch_size'] / num_images
@@ -590,9 +630,9 @@ class STRPN(nn.Module):
         # Sample rois with classification labels and bounding box regression
         # targets
         labels, rois, roi_scores, bbox_targets, bbox_inside_weights, \
-            pid_label = _sample_rois(all_rois, all_scores, gt_boxes,
-                                     fg_rois_per_image, rois_per_image,
-                                     _num_classes, self.num_pid)
+        pid_label, trans_param = _sample_rois(
+            all_rois, all_scores, trans_param, gt_boxes, fg_rois_per_image,
+            rois_per_image, _num_classes, self.num_pid)
 
         rois = rois.view(-1, 5)
         assert rois.size(0) == 128
@@ -605,14 +645,14 @@ class STRPN(nn.Module):
         labels = labels.long()
         pid_label = pid_label.long()
 
-        return rois, (labels, pid_label), (Variable(bbox_targets),
-                                           Variable(bbox_inside_weights),
-                                           Variable(bbox_outside_weights))
+        return rois, (labels, pid_label), trans_param, \
+               (Variable(bbox_targets), Variable(bbox_inside_weights),
+                Variable(bbox_outside_weights))
 
     def initialize_weight(self, trun):
         def normal_init(m, mean, stddev, truncated=False):
             """
-            weight initalizer: truncated normal and random normal.
+            weight initializer: truncated normal and random normal.
             """
             if truncated:
                 # not a perfect approximation
@@ -624,3 +664,5 @@ class STRPN(nn.Module):
         normal_init(self.rpn_net, 0, 0.01, trun)
         normal_init(self.rpn_cls_score_net, 0, 0.01, trun)
         normal_init(self.rpn_bbox_pred_net, 0, 0.01, trun)
+        # TODO: change bias for rpn_transform_net
+        normal_init(self.rpn_transform_net, 0, 0.01, trun)
