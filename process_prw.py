@@ -49,10 +49,10 @@ def process_annotations(root_dir):
             'Warning: {} has no valid boxes.'.format(im_name)
         boxes = boxes[valid_index].astype(np.int32)
 
-        if im_name[:-4] in train_imnames:
+        if im_name in train_imnames:
             train_boxes = np.vstack((train_boxes, boxes))
             train_box_imnames.extend([im_name] * boxes.shape[0])
-        elif im_name[:-4] in test_imnames:
+        elif im_name in test_imnames:
             test_boxes = np.vstack((test_boxes, boxes))
             test_box_imnames.extend([im_name] * boxes.shape[0])
         else:
