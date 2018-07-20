@@ -33,7 +33,6 @@ def parse_args():
     parser.add_argument('--resume', default=0, type=int)
     parser.add_argument('--dataset_name', default='sysu', type=str)
 
-
     args = parser.parse_args()
 
     return args

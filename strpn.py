@@ -19,7 +19,7 @@ from losses import smooth_l1_loss
 from bbox_transform import bbox_transform, bbox_transform_inv, clip_boxes, \
     bbox_overlaps
 from nms.pth_nms import pth_nms as nms
-from roi_pooling.roi_pool import RoIPoolFunction
+# from roi_pooling.roi_pool import RoIPoolFunction
 
 
 class STRPN(nn.Module):
@@ -45,7 +45,7 @@ class STRPN(nn.Module):
         self.anchors = None  # to be set in other methods
 
         pooling_size = self.config['pooling_size']
-        self.roi_pool = RoIPoolFunction(pooling_size, pooling_size, 1. / 16.)
+        # self.roi_pool = RoIPoolFunction(pooling_size, pooling_size, 1. / 16.)
 
         self.rpn_net = nn.Conv2d(
             net_conv_channels, self.rpn_channels, 3, padding=1)
@@ -123,10 +123,10 @@ class STRPN(nn.Module):
 
     def pooling(self, bottom, rois, max_pool=True):
         rois = rois.detach()
-        x1 = rois[:, 1::4] / 16.0
-        y1 = rois[:, 2::4] / 16.0
-        x2 = rois[:, 3::4] / 16.0
-        y2 = rois[:, 4::4] / 16.0
+        x1 = (rois[:, 1::4] / 16.0).squeeze(1)
+        y1 = (rois[:, 2::4] / 16.0).squeeze(1)
+        x2 = (rois[:, 3::4] / 16.0).squeeze(1)
+        y2 = (rois[:, 4::4] / 16.0).squeeze(1)
 
         height = bottom.size(2)
         width = bottom.size(3)
@@ -519,10 +519,9 @@ class STRPN(nn.Module):
                                    size=int(fg_rois_per_im) - gt_box.size(0),
                                    replace=False)).long().cuda()]))
                 else:
-                    lab_inds = (gt_box[:, 5] != -1).nonzero().squeeze().data
+                    lab_inds = (gt_box[:, 5] != -1).nonzero().squeeze(-1)
                     if -1 in gt_box[:, 5].data:
-                        unlab_inds = (gt_box[:, 5] == -1).nonzero().squeeze(
-                        ).data
+                        unlab_inds = (gt_box[:, 5] == -1).nonzero().squeeze(-1)
                         fg_inds = torch.cat((lab_inds, torch.from_numpy(
                             npr.choice(unlab_inds.cpu().numpy(),
                                        size=fg_rois_per_im - lab_inds.numel(),
