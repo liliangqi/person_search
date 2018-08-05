@@ -9,12 +9,12 @@ import os
 import argparse
 
 import torch
+from torch.utils.data import DataLoader
 import yaml
-from torch.autograd import Variable
 import time
 
 from __init__ import clock_non_return
-from dataset import PersonSearchDataset
+from dataset.sipn_dataset import SIPNDataset
 from model import SIPN
 
 
@@ -57,16 +57,14 @@ def cuda_mode(args):
     return cuda
 
 
-def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir,
+def train_model(dataloader, net, lr, optimizer, num_epochs, save_dir,
                 resume_epoch):
     """Train the model"""
 
     all_epoch_loss = 0
+    dataset_len = len(dataloader.dataset)
     start = time.time()
     net.train()
-
-    if use_cuda:
-        net.cuda()
 
     with open('config.yml', 'r') as f:
         config = yaml.load(f)
@@ -78,16 +76,10 @@ def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir,
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= config['gamma']
 
-        for step in range(len(dataset)):
-            im, gt_boxes, im_info = dataset.next()
-            im = im.transpose([0, 3, 1, 2])
-
-            if use_cuda:
-                im = Variable(torch.from_numpy(im).cuda())
-                gt_boxes = Variable(torch.from_numpy(gt_boxes).float().cuda())
-            else:
-                im = Variable(torch.from_numpy(im))
-                gt_boxes = Variable(torch.from_numpy(gt_boxes).float())
+        for step, data in enumerate(dataloader):
+            im, gt_boxes, im_info = data
+            im = im.to(device)
+            gt_boxes = gt_boxes.to(device)
 
             losses = net(im, gt_boxes, im_info)
             optimizer.zero_grad()
@@ -96,7 +88,7 @@ def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir,
             optimizer.step()
 
             all_epoch_loss += total_loss.data[0]
-            current_iter = epoch * len(dataset) + step + 1
+            current_iter = epoch * dataset_len + step + 1
             average_loss = all_epoch_loss / current_iter
 
             if (step+1) % config['disp_interval'] == 0:
@@ -109,7 +101,7 @@ def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir,
                 print('>>>> box: {:.6f}'.format(losses[3].data[0]))
                 print('>>>> reid: {:.6f}'.format(losses[4].data[0]))
                 print('time cost: {:.3f}s/iter'.format(
-                    (end - start) / (epoch * len(dataset) + (step + 1))))
+                    (end - start) / (epoch * dataset_len + (step + 1))))
 
         epoch_end = time.time()
         print('\nEntire epoch time cost: {:.2f} hours\n'.format(
@@ -125,7 +117,8 @@ def train_model(dataset, net, lr, optimizer, num_epochs, use_cuda, save_dir,
 def main():
 
     opt = parse_args()
-    use_cuda = cuda_mode(opt)
+    global device
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     save_dir = os.path.join(opt.out_dir, opt.dataset_name)
     print('Trained models will be save to', os.path.abspath(save_dir))
@@ -137,6 +130,7 @@ def main():
         pre_model = ''
 
     model = SIPN(opt.net, opt.dataset_name, pre_model)
+    model.to(device)
 
     if opt.resume:
         resume = os.path.join(save_dir, 'sipn_' + opt.net + '_' +
@@ -145,7 +139,8 @@ def main():
         model.load_trained_model(torch.load(resume))
 
     # Load the dataset
-    dataset = PersonSearchDataset(opt.data_dir, opt.dataset_name)
+    dataset = SIPNDataset(opt.data_dir, opt.dataset_name, 'train')
+    dataloader = DataLoader(dataset, shuffle=True, num_workers=4)
 
     # Choose parameters to be updated during training
     lr = opt.lr
@@ -166,7 +161,7 @@ def main():
         raise KeyError(opt.optimizer)
 
     # Train the model
-    train_model(dataset, model, lr, optimizer, opt.epochs, use_cuda, save_dir,
+    train_model(dataloader, model, lr, optimizer, opt.epochs, save_dir,
                 opt.resume)
 
     print('Done.\n')
