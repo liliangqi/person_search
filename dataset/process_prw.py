@@ -3,18 +3,30 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 26, 2018
-# Latest rectifying: May 6, 2018
+# Latest rectifying: Aug 5, 2018
 # ----------------------------------------------------------
 import os
+import sys
 import random
 from collections import Counter
 
+import argparse
 import numpy as np
 import pandas as pd
 import scipy.io as sio
 
 
-def process_annotations(root_dir):
+def parse_args():
+    """Parse input arguments"""
+
+    parser = argparse.ArgumentParser(description='Prepare the dataset.')
+    parser.add_argument('--dataset_dir', default='', type=str)
+    args = parser.parse_args()
+
+    return args
+
+
+def process_annotations(root_dir, save_dir):
     """Process all annotation MAT files"""
 
     annotation_dir = os.path.join(root_dir, 'annotations')
@@ -28,11 +40,11 @@ def process_annotations(root_dir):
     test_imnames = [test_name[0] + '.jpg' for test_name in test_imnames]
 
     train_box_imnames = []
-    train_boxes = np.zeros((1, 5), dtype=np.int32)
+    train_boxes = []
     test_box_imnames = []
-    test_boxes = np.zeros((1, 5), dtype=np.int32)
+    test_boxes = []
 
-    for f_name in file_names:
+    for i, f_name in enumerate(file_names, 1):
         im_name = f_name[:-4]
         f_dir = os.path.join(annotation_dir, f_name)
         boxes = sio.loadmat(f_dir)
@@ -43,25 +55,28 @@ def process_annotations(root_dir):
         elif 'anno_previous' in boxes.keys():
             boxes = boxes['anno_previous']
         else:
-            raise KeyError(boxes.keys()[-1])
+            raise KeyError(boxes.keys())
         valid_index = np.where((boxes[:, 3] > 0) & (boxes[:, 4] > 0))[0]
         assert valid_index.size > 0, \
             'Warning: {} has no valid boxes.'.format(im_name)
         boxes = boxes[valid_index].astype(np.int32)
 
         if im_name in train_imnames:
-            train_boxes = np.vstack((train_boxes, boxes))
+            train_boxes.append(boxes)
             train_box_imnames.extend([im_name] * boxes.shape[0])
         elif im_name in test_imnames:
-            test_boxes = np.vstack((test_boxes, boxes))
+            test_boxes.append(boxes)
             test_box_imnames.extend([im_name] * boxes.shape[0])
         else:
-            print('{:s} does not exsit'.format(im_name))
-            exit()
+            print('{:s} does not exist'.format(im_name))
+            sys.exit()
 
-    # remove the first row
-    train_boxes = train_boxes[1:]
-    test_boxes = test_boxes[1:]
+        if i % 1000 == 0:
+            print('Image {} processed.'.format(i))
+
+    # Concat all the boxes
+    train_boxes = np.vstack(train_boxes).astype(np.int32)
+    test_boxes = np.vstack(test_boxes).astype(np.int32)
 
     # Indicate the order of the column names
     ordered_columns = ['imname', 'x1', 'y1', 'del_x', 'del_y', 'cls_id', 'pid']
@@ -82,24 +97,27 @@ def process_annotations(root_dir):
     train_imnames = pd.Series(train_imnames)
     test_imnames = pd.Series(test_imnames)
 
-    train_boxes_df.to_csv(os.path.join(root_dir, 'trainAllDF.csv'),
+    train_test_dfs = (train_boxes_df, test_boxes_df, train_imnames,
+                      test_imnames)
+    train_test_dfs = fix_train_test(root_dir, train_test_dfs)
+    train_test_dfs = remove_outliers(train_test_dfs)
+
+    # Write csv files
+    train_boxes_df, test_boxes_df, train_imnames, test_imnames = train_test_dfs
+    train_boxes_df.to_csv(os.path.join(save_dir, 'trainAllDF.csv'),
                           index=False)
-    test_boxes_df.to_csv(os.path.join(root_dir, 'testAllDF.csv'), index=False)
-    train_imnames.to_csv(os.path.join(root_dir, 'trainImnamesSe.csv'),
+    test_boxes_df.to_csv(os.path.join(save_dir, 'testAllDF.csv'), index=False)
+    train_imnames.to_csv(os.path.join(save_dir, 'trainImnamesSe.csv'),
                          index=False)
-    test_imnames.to_csv(os.path.join(root_dir, 'testImnamesSe.csv'),
+    test_imnames.to_csv(os.path.join(save_dir, 'testImnamesSe.csv'),
                         index=False)
 
 
-def fix_train_test(root_dir):
+def fix_train_test(root_dir, train_test_dfs):
     """Fix training set and test set."""
 
-    train_boxes_df = pd.read_csv(os.path.join(root_dir, 'trainAllDF.csv'))
-    test_boxes_df = pd.read_csv(os.path.join(root_dir, 'testAllDF.csv'))
-    train_imnames = pd.read_csv(os.path.join(root_dir, 'trainImnamesSe.csv'),
-                                header=None, squeeze=True)
-    test_imnames = pd.read_csv(os.path.join(root_dir, 'testImnamesSe.csv'),
-                               header=None, squeeze=True)
+    print('\nFixing training and testing annotation files...')
+    train_boxes_df, test_boxes_df, train_imnames, test_imnames = train_test_dfs
     train_ids = sio.loadmat(os.path.join(
         root_dir, 'ID_train.mat'))['ID_train'].squeeze()
     test_ids = sio.loadmat(os.path.join(
@@ -107,7 +125,7 @@ def fix_train_test(root_dir):
 
     # Pick out those images that do NOT contain test IDs
     remove_imnames = []
-    only_unlabeled_imnames = []  # TODO: may be we can add these to test set
+    only_unlabeled_imnames = []  # TODO: maybe we can add these to test set
 
     for im_name in test_imnames:
         df = test_boxes_df[test_boxes_df['imname'] == im_name]
@@ -147,22 +165,58 @@ def fix_train_test(root_dir):
             train_boxes_df.ix[i, 'pid'] = train_dict[
                 train_boxes_df.ix[i, 'pid']]
 
-    # Rewirte csv files
-    train_boxes_df.to_csv(os.path.join(root_dir, 'trainAllDF.csv'),
-                          index=False)
-    test_boxes_df.to_csv(os.path.join(root_dir, 'testAllDF.csv'), index=False)
-    train_imnames.to_csv(os.path.join(root_dir, 'trainImnamesSe.csv'),
-                         index=False)
-    test_imnames.to_csv(os.path.join(root_dir, 'testImnamesSe.csv'),
-                        index=False)
+    train_test_dfs = (train_boxes_df, test_boxes_df, train_imnames,
+                      test_imnames)
+    print('Done.')
+
+    return train_test_dfs
 
 
-def produce_query_set(root_dir):
+def remove_outliers(train_test_dfs):
+    """Remove the outlier images that contain more than one same person."""
+
+    print('\nRemoving outliers in annotation files')
+    train_boxes_df, test_boxes_df, train_imnames, test_imnames = train_test_dfs
+
+    # Test set
+    exception_test_indices = []
+    for im_name in test_imnames:
+        im_df = test_boxes_df[test_boxes_df['imname'] == im_name]
+        counter = Counter(im_df['pid'])
+        for idx in counter.keys():
+            if idx > -1 and counter[idx] > 1:
+                pid_df = im_df.query('pid==@idx')
+                exc_inds = pid_df.index.tolist()[1:]
+                exception_test_indices.extend(exc_inds)
+    test_boxes_df.drop(exception_test_indices, axis=0, inplace=True)
+    test_boxes_df.index = range(test_boxes_df.shape[0])
+
+    # Training set
+    exception_train_indices = []
+    for im_name in train_imnames:
+        im_df = train_boxes_df[train_boxes_df['imname'] == im_name]
+        counter = Counter(im_df['pid'])
+        for idx in counter.keys():
+            if idx > -1 and counter[idx] > 1:
+                pid_df = im_df.query('pid==@idx')
+                exc_inds = pid_df.index.tolist()[1:]
+                exception_train_indices.extend(exc_inds)
+    train_boxes_df.drop(exception_train_indices, axis=0, inplace=True)
+    train_boxes_df.index = range(train_boxes_df.shape[0])
+
+    train_test_dfs = (train_boxes_df, test_boxes_df, train_imnames,
+                      test_imnames)
+    print('Done.')
+
+    return train_test_dfs
+
+
+def produce_query_set(root_dir, save_dir):
     """Produce query set"""
 
     test_ids = sio.loadmat(os.path.join(
         root_dir, 'ID_test.mat'))['ID_test2'].squeeze()
-    test_boxes_df = pd.read_csv(os.path.join(root_dir, 'testAllDF.csv'))
+    test_boxes_df = pd.read_csv(os.path.join(save_dir, 'testAllDF.csv'))
     test_dict = {id_num: i for i, id_num in enumerate(test_ids)}
 
     query_imnames = []
@@ -207,18 +261,17 @@ def produce_query_set(root_dir):
         queries_num_g.append(num_g)
 
     query_boxes_df['num_g'] = queries_num_g
+    query_boxes_df.to_csv(os.path.join(save_dir, 'queryDF.csv'), index=False)
 
-    query_boxes_df.to_csv(os.path.join(root_dir, 'queryDF.csv'), index=False)
 
-
-def produce_query_gallery(root_dir):
+def produce_query_gallery(root_dir, save_dir):
     """Produce query_to_gallery"""
 
     test_ids = sio.loadmat(os.path.join(
         root_dir, 'ID_test.mat'))['ID_test2'].squeeze()
-    test_boxes_df = pd.read_csv(os.path.join(root_dir, 'testAllDF.csv'))
-    query_boxes_df = pd.read_csv(os.path.join(root_dir, 'queryDF.csv'))
-    test_imnames = pd.read_csv(os.path.join(root_dir, 'testImnamesSe.csv'),
+    test_boxes_df = pd.read_csv(os.path.join(save_dir, 'testAllDF.csv'))
+    query_boxes_df = pd.read_csv(os.path.join(save_dir, 'queryDF.csv'))
+    test_imnames = pd.read_csv(os.path.join(save_dir, 'testImnamesSe.csv'),
                                header=None, squeeze=True)
 
     # Count how many images that contain the specific ID
@@ -228,7 +281,7 @@ def produce_query_gallery(root_dir):
         id_appearence[id_num] = num_boxes
 
     # get gallery sizes
-    chosen_sizes = [50, 100, 200, 500, 1000, 1500, 2000, 4000]
+    chosen_sizes = [50, 100, 200, 500, 700, 1000, 1500, 2000, 4000]
     gallery_sizes = [size for size in chosen_sizes
                      if size > max(id_appearence.values())]
 
@@ -257,43 +310,26 @@ def produce_query_gallery(root_dir):
         queries_to_galleries = pd.DataFrame(queries_to_galleries,
                                             index=query_boxes_df['imname'])
         queries_to_galleries.to_csv(os.path.join(
-            root_dir, 'q_to_g' + str(size) + 'DF.csv'))
+            save_dir, 'q_to_g' + str(size) + 'DF.csv'))
 
 
 def main():
-    root_dir = '/Users/habor/Desktop/myResearch/PRW4person_search/prw_orig'
-    # process_annotations(root_dir)
-    # fix_train_test(root_dir)
-    # produce_query_set(root_dir)
-    produce_query_gallery(root_dir)
 
-    # test_all = pd.read_csv(os.path.join(root_dir, 'testAllDF.csv'))
-    # test_imnames = pd.read_csv(os.path.join(root_dir, 'testImnamesSe.csv'),
-    #                            header=None, squeeze=True)
-    # exception_test_image = []
-    # for im_name in test_imnames:
-    #     im_df = test_all[test_all['imname'] == im_name]
-    #     counter = Counter(im_df['pid'])
-    #     for id in counter.keys():
-    #         if id > -1 and counter[id] > 1:
-    #             exception_test_image.append(im_name)
+    args = parse_args()
+    root_dir = args.dataset_dir
+    save_dir = os.path.join(root_dir, 'SIPN_annotation')
 
-    train_imnames = pd.read_csv(os.path.join(root_dir, 'trainImnamesSe.csv'),
-                                header=None, squeeze=True)
-    train_all = pd.read_csv(os.path.join(root_dir, 'trainAllDF.csv'))
-    # exception_train_image = []
-    # for im_name in train_imnames:
-    #     im_df = train_all[train_all['imname'] == im_name]
-    #     counter = Counter(im_df['pid'])
-    #     for id in counter.keys():
-    #         if id > -1 and counter[id] > 1:
-    #             exception_train_image.append(im_name)
-    train_dict = {}
-    for im_name in train_imnames:
-        df = train_all[train_all['imname'] == im_name]
-        train_dict[im_name] = len(set(df['pid']))
+    if not os.path.exists(save_dir):
+        os.mkdir(save_dir)
 
-    print('Done')
+    print('Processing the mat files...')
+    process_annotations(root_dir, save_dir)
+    print('Producing test files')
+    produce_query_set(root_dir, save_dir)
+    produce_query_gallery(root_dir, save_dir)
+
+    print('Dataset processing done.')
+
 
 if __name__ == '__main__':
 
