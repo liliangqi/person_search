@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 28, 2018
-# Latest rectified: May 11, 2018
+# Latest rectified: Aug 7, 2018
 # -----------------------------------------------------
 
 import os
@@ -34,7 +34,7 @@ def _compute_iou(a, b):
     return inter * 1.0 / union
 
 
-def pre_process_image(im_path, flipped=0, copy=False):
+def pre_process_image(im_path, flipped=False, copy=False):
     """Pre-process the image"""
 
     with open('config.yml', 'r') as f:
@@ -46,7 +46,7 @@ def pre_process_image(im_path, flipped=0, copy=False):
 
     im = cv2.imread(im_path)
     orig_shape = im.shape
-    if flipped == 1:
+    if flipped:
         im = im[:, ::-1, :]
     im = im.astype(np.float32, copy=copy)
     im -= pixel_means
@@ -104,32 +104,34 @@ class SIPNDataset(Dataset):
         return self.imnames.shape[0]
 
     def __getitem__(self, index):
-        im_name = self.imnames.iloc[index]['imname']
+        im_name = self.imnames[index]
         im_path = os.path.join(self.image_dir, im_name)
         boxes_df = self.all_boxes.query('imname==@im_name')
-        boxes = boxes_df['x1': 'pid']
-        boxes['del_x'] += boxes['x1']
-        boxes['del_y'] += boxes['y1']
-        boxes = boxes.values
+        boxes = boxes_df.loc[:, 'x1': 'pid'].copy()
+        boxes.loc[:, 'del_x'] += boxes.loc[:, 'x1']
+        boxes.loc[:, 'del_y'] += boxes.loc[:, 'y1']
+        boxes = boxes.values.astype(np.float32)
 
         flip = random.random() < 0.5 if self.split == 'train' else False
+        # TODO: use transform
         im, im_scale, orig_shape = pre_process_image(im_path, flip)
         if im.ndim == 4:
-            im = im.flatten()
-        width = orig_shape[0]
-        assert width > max(boxes[:, 0]) and width > max(boxes[:, 2]), \
-            'Bounding box exceeds the image border'
+            im = im.squeeze(0)
+        height = orig_shape[1]
+        # assert height > max(boxes[:, 0]) and height > max(boxes[:, 2]), \
+        #     'Bounding box exceeds the border of image {}'.format(im_name)
+        boxes_temp = boxes.copy()
         if flip:
-            boxes[:, 0] = width - boxes[:, 0]
-            boxes[:, 2] = width - boxes[:, 2]
+            boxes[:, 2] = height - boxes_temp[:, 0] + 1
+            boxes[:, 0] = height - boxes_temp[:, 2] + 1
 
         boxes[:, :4] *= im_scale
         im_info = np.array([im.shape[0], im.shape[1], im_scale],
                            dtype=np.float32)
 
-        im = im.transpose([3, 1, 2])
+        im = im.transpose([2, 0, 1])
         im = torch.Tensor(im).float()
-        boxes = torch.Tensor(im).float()
+        boxes = torch.Tensor(boxes).float()
 
         return im, (boxes, im_info)
 
@@ -148,9 +150,9 @@ class PersonSearchDataset:
         self.root_dir = root_dir
         self.dataset_name = dataset_name
         self.split = split_name
-        self.images_dir = osp.join(self.root_dir, 'Image/SSM')
-        self.annotation_dir = osp.join(self.root_dir, 'annotation')
-        self.cache_dir = osp.join(self.root_dir, '..', 'cache')
+        self.images_dir = osp.join(self.root_dir, 'frames')
+        self.annotation_dir = osp.join(self.root_dir, 'SIPN_annotation')
+        self.cache_dir = osp.join(self.annotation_dir, 'cache')
 
         self.train_imnames_file = 'trainImnamesSe.csv'
         self.train_imnamesDF_file = 'trainImnamesDF.csv'
@@ -180,7 +182,7 @@ class PersonSearchDataset:
             else:
                 self.train_imnames, self.train_all = self.prepare_training()
             self.train_imnames_list = list(range(self.train_imnames.shape[0]))
-            random.shuffle(self.train_imnames_list)  # shuffle the list
+            # random.shuffle(self.train_imnames_list)  # shuffle the list
             self.train_imnames_list_equip = self.train_imnames_list[:]
             self.num_train_images = self.train_imnames.shape[0]
 
@@ -294,7 +296,7 @@ class PersonSearchDataset:
                 # self.train_imnames = pd.read_csv(
                 #     osp.join(self.cache_dir, self.train_imnamesDF_file))
 
-            chosen = self.train_imnames_list.pop()
+            chosen = self.train_imnames_list.pop(0)
             im_name, flipped = self.train_imnames.loc[chosen]
             im_path = osp.join(self.images_dir, im_name)
 
