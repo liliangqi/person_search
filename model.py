@@ -3,11 +3,10 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectified: May 11, 2018
+# Latest rectified: Aug 7, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
-from torch.autograd import Variable
 import torch.nn.functional as F
 import yaml
 
@@ -122,16 +121,16 @@ class SIPN(nn.Module):
                     config = yaml.load(f)
                 mean = config['train_bbox_normalize_means']
                 std = config['train_bbox_normalize_stds']
-                means = bbox_pred.data.new(mean).repeat(2).unsqueeze(
-                    0).expand_as(bbox_pred)
-                stds = bbox_pred.data.new(std).repeat(2).unsqueeze(
-                    0).expand_as(bbox_pred)
-                bbox_pred = bbox_pred.mul(Variable(stds)).add(Variable(means))
+                means = bbox_pred.new(mean).repeat(2).unsqueeze(0).expand_as(
+                    bbox_pred)
+                stds = bbox_pred.new(std).repeat(2).unsqueeze(0).expand_as(
+                    bbox_pred)
+                bbox_pred = bbox_pred.mul(stds).add(means)
 
-                cls_prob = cls_prob.data.cpu().numpy()
-                bbox_pred = bbox_pred.data.cpu().numpy()
-                rois = rois.data.cpu().numpy()
-                reid_feat = reid_feat.data.cpu().numpy()
+                cls_prob = cls_prob.cpu().numpy()
+                bbox_pred = bbox_pred.cpu().numpy()
+                rois = rois.cpu().numpy()
+                reid_feat = reid_feat.cpu().numpy()
 
                 return cls_prob, bbox_pred, rois, reid_feat
 
