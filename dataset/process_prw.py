@@ -264,15 +264,14 @@ def produce_query_set(root_dir, save_dir):
     query_boxes_df.to_csv(os.path.join(save_dir, 'queryDF.csv'), index=False)
 
 
-def produce_query_gallery(root_dir, save_dir):
+def produce_query_gallery(save_dir):
     """Produce query_to_gallery"""
 
-    test_ids = sio.loadmat(os.path.join(
-        root_dir, 'ID_test.mat'))['ID_test2'].squeeze()
     test_boxes_df = pd.read_csv(os.path.join(save_dir, 'testAllDF.csv'))
     query_boxes_df = pd.read_csv(os.path.join(save_dir, 'queryDF.csv'))
     test_imnames = pd.read_csv(os.path.join(save_dir, 'testImnamesSe.csv'),
                                header=None, squeeze=True)
+    test_ids = list(set(test_boxes_df['pid']) - {-1})
 
     # Count how many images that contain the specific ID
     id_appearence = {}
@@ -286,6 +285,7 @@ def produce_query_gallery(root_dir, save_dir):
                      if size > max(id_appearence.values())]
 
     for size in gallery_sizes:
+        print('Producing gallery with size {}...'.format(size))
         queries_to_galleries = [[] for _ in range(query_boxes_df.shape[0])]
         for i in range(query_boxes_df.shape[0]):
             q_name = query_boxes_df.iloc[i]['imname']
@@ -326,7 +326,7 @@ def main():
     process_annotations(root_dir, save_dir)
     print('Producing test files')
     produce_query_set(root_dir, save_dir)
-    produce_query_gallery(root_dir, save_dir)
+    produce_query_gallery(save_dir)
 
     print('Dataset processing done.')
 
