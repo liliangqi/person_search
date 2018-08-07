@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 31, 2018
-# Latest rectified: May 11, 2018
+# Latest rectified: Aug 7, 2018
 # -----------------------------------------------------
 import os
 import argparse
@@ -23,7 +23,7 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description='Training')
     parser.add_argument('--net', default='res50', type=str)
-    parser.add_argument('--epochs', default=10, type=int)
+    parser.add_argument('--epochs', default=20, type=int)
     parser.add_argument('--gpu_ids', default='0', type=str)
     parser.add_argument('--data_dir', default='', type=str)
     parser.add_argument('--lr', default=0.0001, type=float)
@@ -31,7 +31,7 @@ def parse_args():
     parser.add_argument('--out_dir', default='./output', type=str)
     parser.add_argument('--pre_model', default='', type=str)
     parser.add_argument('--resume', default=0, type=int)
-    parser.add_argument('--dataset_name', default='sysu', type=str)
+    parser.add_argument('--dataset_name', default='prw', type=str)
 
     args = parser.parse_args()
 
@@ -71,15 +71,16 @@ def train_model(dataloader, net, lr, optimizer, num_epochs, save_dir,
 
     for epoch in range(resume_epoch, num_epochs):
         epoch_start = time.time()
-        if epoch in [2, 4]:
+        if epoch in [4, 8]:
             lr *= config['gamma']  # TODO: use lr_scheduel
             for param_group in optimizer.param_groups:
                 param_group['lr'] *= config['gamma']
 
         for step, data in enumerate(dataloader):
-            im, gt_boxes, im_info = data
+            im, (gt_boxes, im_info) = data
             im = im.to(device)
-            gt_boxes = gt_boxes.to(device)
+            gt_boxes = gt_boxes.squeeze(0).to(device)
+            im_info = im_info.numpy().squeeze(0)
 
             losses = net(im, gt_boxes, im_info)
             optimizer.zero_grad()
@@ -87,19 +88,21 @@ def train_model(dataloader, net, lr, optimizer, num_epochs, save_dir,
             total_loss.backward()
             optimizer.step()
 
-            all_epoch_loss += total_loss.data[0]
+            all_epoch_loss += total_loss.item()
             current_iter = epoch * dataset_len + step + 1
             average_loss = all_epoch_loss / current_iter
+
+            torch.cuda.empty_cache()
 
             if (step+1) % config['disp_interval'] == 0:
                 end = time.time()
                 print('Epoch {:2d}, iter {:5d}, average loss: {:.6f}, lr: '
                       '{:.2e}'.format(epoch+1, step+1, average_loss, lr))
-                print('>>>> rpn_cls: {:.6f}'.format(losses[0].data[0]))
-                print('>>>> rpn_box: {:.6f}'.format(losses[1].data[0]))
-                print('>>>> cls: {:.6f}'.format(losses[2].data[0]))
-                print('>>>> box: {:.6f}'.format(losses[3].data[0]))
-                print('>>>> reid: {:.6f}'.format(losses[4].data[0]))
+                print('>>>> rpn_cls: {:.6f}'.format(losses[0].item()))
+                print('>>>> rpn_box: {:.6f}'.format(losses[1].item()))
+                print('>>>> cls: {:.6f}'.format(losses[2].item()))
+                print('>>>> box: {:.6f}'.format(losses[3].item()))
+                print('>>>> reid: {:.6f}'.format(losses[4].item()))
                 print('time cost: {:.3f}s/iter'.format(
                     (end - start) / (epoch * dataset_len + (step + 1))))
 
@@ -140,7 +143,7 @@ def main():
 
     # Load the dataset
     dataset = SIPNDataset(opt.data_dir, opt.dataset_name, 'train')
-    dataloader = DataLoader(dataset, shuffle=True, num_workers=4)
+    dataloader = DataLoader(dataset, shuffle=True, num_workers=8)
 
     # Choose parameters to be updated during training
     lr = opt.lr
