@@ -3,19 +3,18 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 26, 2018
-# Latest rectified: May 11, 2018
+# Latest rectified: Aug 7, 2018
 # -----------------------------------------------------
 import os
 import argparse
 
 import torch
-from torch.autograd import Variable
 import yaml
 import numpy as np
 import matplotlib.pyplot as plt
 
 from __init__ import clock_non_return
-from dataset import pre_process_image
+from dataset.sipn_dataset import pre_process_image
 from model import SIPN
 from bbox_transform import bbox_transform_inv
 from nms.pth_nms import pth_nms as nms
