@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 26, 2018
-# Latest rectifying: Aug 5, 2018
+# Latest rectifying: Aug 8, 2018
 # ----------------------------------------------------------
 import os
 import sys
@@ -220,7 +220,7 @@ def produce_query_set(root_dir, save_dir):
     test_dict = {id_num: i for i, id_num in enumerate(test_ids)}
 
     query_imnames = []
-    query_boxes = np.zeros((1, 5), dtype=np.int32)
+    query_boxes = []
 
     with open(os.path.join(root_dir, 'query_info.txt')) as f:
         for line in f.readlines():
@@ -228,10 +228,10 @@ def produce_query_set(root_dir, save_dir):
             im_name = line[-1].rstrip() + '.jpg'
             box = np.array([line[:-1]]).astype(np.float32).astype(np.int32)
             query_imnames.append(im_name)
-            query_boxes = np.vstack((query_boxes, box))
+            query_boxes.append(box)
 
-    query_boxes = query_boxes[1:]
-
+    # Concat all the boxes
+    query_boxes = np.vstack(query_boxes)
     # Indicate the order of the column names
     ordered_columns = ['imname', 'x1', 'y1', 'del_x', 'del_y', 'pid']
     query_boxes_df = pd.DataFrame(
@@ -251,7 +251,7 @@ def produce_query_set(root_dir, save_dir):
         df = test_boxes_df[test_boxes_df['pid'] == pid]
         num_g = 0
 
-        # gt_gallery refers to those images that contain the `pid` person
+        # `gt_gallery` refers to those images that contain the "pid" person
         gt_gallery = list(set(df['imname']))
         gt_gallery.remove(q_name)
         for gt_im in gt_gallery:
@@ -265,7 +265,10 @@ def produce_query_set(root_dir, save_dir):
 
 
 def produce_query_gallery(save_dir):
-    """Produce query_to_gallery"""
+    """
+    Produce several DataFrames to save reflects from queries to galleries,
+    image names of queries are used as indices
+    """
 
     test_boxes_df = pd.read_csv(os.path.join(save_dir, 'testAllDF.csv'))
     query_boxes_df = pd.read_csv(os.path.join(save_dir, 'queryDF.csv'))
@@ -310,7 +313,7 @@ def produce_query_gallery(save_dir):
         queries_to_galleries = pd.DataFrame(queries_to_galleries,
                                             index=query_boxes_df['imname'])
         queries_to_galleries.to_csv(os.path.join(
-            save_dir, 'q_to_g' + str(size) + 'DF.csv'))
+            save_dir, 'q_to_g{}DF.csv'.format(size)))
 
 
 def main():
