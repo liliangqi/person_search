@@ -224,7 +224,8 @@ class resnet:
                     state_dict = torch.load(pre_model)
                     self.model.load_state_dict(
                         {k: state_dict[k] for k in list(
-                            self.model.state_dict())})
+                            self.model.state_dict())
+                         if 'num_batches_tracked' not in k})
                 else:
                     self.model = resnet50(True)
             else:
