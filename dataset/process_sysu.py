@@ -86,8 +86,6 @@ def process_annotations(root_dir, save_dir):
         save_dir, 'trainAllDF.csv'), index=False)
     test_boxes_df.to_csv(os.path.join(save_dir, 'testAllDF.csv'), index=False)
 
-    return bboxes_df, imnames
-
 
 def process_train_mat(annotation_dir):
     """
@@ -260,7 +258,7 @@ def remove_outliers(train_test_dfs):
 
     train_test_dfs = (train_boxes_df, test_boxes_df, train_imnames,
                       test_imnames)
-    print('Done.')
+    print('Done.\n')
 
     return train_test_dfs
 
