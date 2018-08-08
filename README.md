@@ -41,7 +41,7 @@ Liangqi Li, Hua Yang, Lin Chen. "Spatial Invariant Person Search Network", PRCV 
    sh setup.sh
    ```
 
-3. Generate appropriate annotation files for the datasets. The path to the specific dataset is denoted as DATASET_PATH.
+3. Generate appropriate annotation files for the datasets. The path to the specific dataset is denoted as DATASET_PATH. *This step may take a long while, please be patient.*
 
    ```bash
    cd dataset
@@ -56,6 +56,7 @@ Liangqi Li, Hua Yang, Lin Chen. "Spatial Invariant Person Search Network", PRCV 
    - PRW
 
      ```bash
+     mv DATASET_PATH/Image/SSM DATASET_PATH/frames
      python process_prw.py --dataset_dir DATASET_PATH
      ```
 
@@ -69,15 +70,17 @@ Liangqi Li, Hua Yang, Lin Chen. "Spatial Invariant Person Search Network", PRCV 
    cd ..
    ```
 
-4. ​
+4. (Optional) Get pre-trained ResNet-50 [here](https://drive.google.com/file/d/14ZsYYXq6t9mv_2BMMuEFLcCeZaXLMWAF/view?usp=sharing).
 
-Outliers in SYSU training set (one id appears twice in an image):
-  ['s14319.jpg', 's1663.jpg', 's9239.jpg', 's4531.jpg', 's10716.jpg']
+## Train
 
-Outliers in SYSU testing set (one id appears twice in an image):
-  ['s14430.jpg', 's3981.jpg', 's11888.jpg', 's888.jpg', 's5957.jpg', 's12295.jpg']
+Train the model by indicating the model name, the path to the dataset and dataset name ("sysu" or "prw")
 
-Outliers in PRW training set (one id appears twice in an image):
-  ['c1s1_019476.jpg', 'c3s1_096067.jpg', 'c1s2_024091.jpg', 'c2s1_095446.jpg', 'c2s1_091696.jpg', 'c1s1_047526.jpg', 'c1s1_005401.jpg', 'c3s1_069842.jpg', 'c1s2_019916.jpg', 'c6s1_000476.jpg']
+```bash
+python train.py --net res50 --data_dir DATASET_PATH --dataset_name sysu
+```
 
-There are no outliers in PRW testing set.
+## Test
+
+The test code is rewriting now.
+
