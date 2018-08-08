@@ -50,13 +50,13 @@ Liangqi Li, Hua Yang, Lin Chen. "Spatial Invariant Person Search Network", PRCV 
    - CUHK-SYSU
 
      ```bash
+     mv DATASET_PATH/Image/SSM DATASET_PATH/frames
      python process_sysu.py --dataset_dir DATASET_PATH
      ```
 
    - PRW
 
      ```bash
-     mv DATASET_PATH/Image/SSM DATASET_PATH/frames
      python process_prw.py --dataset_dir DATASET_PATH
      ```
 
