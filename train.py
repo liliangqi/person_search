@@ -15,6 +15,7 @@ import time
 
 from __init__ import clock_non_return
 from dataset.sipn_dataset import SIPNDataset
+import dataset.sipn_transforms as sipn_transforms
 from model import SIPN
 
 
@@ -36,25 +37,6 @@ def parse_args():
     args = parser.parse_args()
 
     return args
-
-
-def cuda_mode(args):
-    """set cuda"""
-    if torch.cuda.is_available() and '-1' not in args.gpu_ids:
-        cuda = True
-        str_ids = args.gpu_ids.split(',')
-        gpu_ids = []
-        for str_id in str_ids:
-            gid = int(str_id)
-            if gid >= 0:
-                gpu_ids.append(gid)
-
-        if len(gpu_ids) > 0:
-            torch.cuda.set_device(gpu_ids[0])
-    else:
-        cuda = False
-
-    return cuda
 
 
 def train_model(dataloader, net, lr, optimizer, num_epochs, save_dir,
@@ -141,8 +123,23 @@ def main():
         print('Resuming model check point from {}'.format(resume))
         model.load_trained_model(torch.load(resume))
 
+    # Read the configuration file
+    with open('config.yml', 'r') as f:
+        config = yaml.load(f)
+    target_size = config['target_size']
+    max_size = config['max_size']
+    pixel_means = config['pixel_means']
+
+    # Compose transformations for the dataset
+    transform = sipn_transforms.Compose([
+        sipn_transforms.RandomHorizontalFlip(),
+        sipn_transforms.Scale(target_size, max_size),
+        sipn_transforms.ToTensor(),
+        sipn_transforms.Normalize(pixel_means)
+    ])
+
     # Load the dataset
-    dataset = SIPNDataset(opt.data_dir, opt.dataset_name, 'train')
+    dataset = SIPNDataset(opt.data_dir, opt.dataset_name, 'train', transform)
     dataloader = DataLoader(dataset, shuffle=True, num_workers=8)
 
     # Choose parameters to be updated during training
