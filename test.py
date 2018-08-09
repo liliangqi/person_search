@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 10, 2018
-# Latest rectified: May 11, 2018
+# Latest rectified: Aug 8, 2018
 # -----------------------------------------------------
 import os
 import argparse
@@ -15,7 +15,7 @@ import yaml
 from torch.autograd import Variable
 import time
 
-from dataset import PersonSearchDataset
+from dataset.sipn_dataset import PersonSearchDataset
 from model import SIPN
 from bbox_transform import bbox_transform_inv
 from nms.pth_nms import pth_nms as nms
@@ -27,13 +27,13 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description='Testing')
     parser.add_argument('--net', default='res50', type=str)
-    parser.add_argument('--trained_epochs', default='10', type=str)
+    parser.add_argument('--trained_epochs', default='14', type=str)
     parser.add_argument('--gpu_ids', default='0', type=str)
     parser.add_argument('--data_dir', default='', type=str)
     parser.add_argument('--out_dir', default='./output', type=str)
-    parser.add_argument('--use_saved_result', default=0, type=int)
-    parser.add_argument('--dataset_name', default='sysu', type=str)
-    parser.add_argument('--gallery_size', default=500, type=int)
+    parser.add_argument('--use_saved_result', default=1, type=int)
+    parser.add_argument('--dataset_name', default='prw', type=str)
+    parser.add_argument('--gallery_size', default=200, type=int)
 
     args = parser.parse_args()
 
@@ -87,12 +87,13 @@ def test_gallery(net, dataset, use_cuda, output_dir, thresh=0.):
         im, im_info, orig_shape = dataset.next()
         im = im.transpose([0, 3, 1, 2])
 
-        if use_cuda:
-            im = Variable(torch.from_numpy(im).cuda(), volatile=True)
-        else:
-            im = Variable(torch.from_numpy(im), volatile=True)
+        with torch.no_grad():
+            if use_cuda:
+                im = Variable(torch.from_numpy(im).cuda())
+            else:
+                im = Variable(torch.from_numpy(im))
 
-        scores, bbox_pred, rois, features = net.forward(im, None, im_info)
+            scores, bbox_pred, rois, features = net.forward(im, None, im_info)
 
         boxes = rois[:, 1:5] / im_info[2]
         scores = np.reshape(scores, [scores.shape[0], -1])
@@ -151,12 +152,13 @@ def test_query(net, dataset, use_cuda, output_dir):
         im = im.transpose([0, 3, 1, 2])
         roi = np.hstack(([[0]], roi.reshape(1, 4)))
 
-        if use_cuda:
-            im = Variable(torch.from_numpy(im).cuda(), volatile=True)
-            roi = Variable(torch.from_numpy(roi).float().cuda())
-        else:
-            im = Variable(torch.from_numpy(im), volatile=True)
-            roi = Variable(torch.from_numpy(roi).float())
+        with torch.no_grad():
+            if use_cuda:
+                im = Variable(torch.from_numpy(im).cuda())
+                roi = Variable(torch.from_numpy(roi).float().cuda())
+            else:
+                im = Variable(torch.from_numpy(im))
+                roi = Variable(torch.from_numpy(roi).float())
 
         features = net.forward(im, roi, im_info, dataset.test_mode)
         all_features[i] = features[0]  # TODO: check this
