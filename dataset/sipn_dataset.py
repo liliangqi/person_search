@@ -5,7 +5,6 @@
 # Creating Date: Mar 28, 2018
 # Latest rectified: Aug 7, 2018
 # -----------------------------------------------------
-
 import os
 import os.path as osp
 import time
@@ -112,11 +111,21 @@ class SIPNDataset(Dataset):
         boxes.loc[:, 'del_y'] += boxes.loc[:, 'y1']
         boxes = boxes.values.astype(np.float32)
 
-        flip = random.random() < 0.5 if self.split == 'train' else False
-        # TODO: use transform
-        im, im_scale, orig_shape = pre_process_image(im_path, flip)
-        if im.ndim == 4:
-            im = im.squeeze(0)
+        im = cv2.imread(im_path).astype(np.float32)
+        orig_shape = im.shape
+        im, im_scale, flip = self.transform(im)
+        im_info = np.array(
+            [im.shape[1], im.shape[2], im_scale], dtype=np.float32)
+
+        # flip = random.random() < 0.5 if self.split == 'train' else False
+        # im, im_scale, orig_shape = pre_process_image(im_path, flip)
+        # if im.ndim == 4:
+        #     im = im.squeeze(0)
+        # im_info = np.array([im.shape[0], im.shape[1], im_scale],
+        #                    dtype=np.float32)
+        # im = im.transpose([2, 0, 1])
+        # im = torch.Tensor(im).float()
+
         height = orig_shape[1]
         # assert height > max(boxes[:, 0]) and height > max(boxes[:, 2]), \
         #     'Bounding box exceeds the border of image {}'.format(im_name)
@@ -126,11 +135,6 @@ class SIPNDataset(Dataset):
             boxes[:, 0] = height - boxes_temp[:, 2] + 1
 
         boxes[:, :4] *= im_scale
-        im_info = np.array([im.shape[0], im.shape[1], im_scale],
-                           dtype=np.float32)
-
-        im = im.transpose([2, 0, 1])
-        im = torch.Tensor(im).float()
         boxes = torch.Tensor(boxes).float()
 
         return im, (boxes, im_info)
@@ -415,8 +419,8 @@ class PersonSearchDataset:
         precision, recall, __ = precision_recall_curve(y_true, y_score)
         recall *= det_rate
 
-        plt.plot(recall, precision)
-        plt.savefig('pr.jpg')
+        # plt.plot(recall, precision)
+        # plt.savefig('pr.jpg')
 
         print(
             '{} detection:'.format('labeled only' if labeled_only else 'all'))
