@@ -126,13 +126,13 @@ class SIPNDataset(Dataset):
         # im = im.transpose([2, 0, 1])
         # im = torch.Tensor(im).float()
 
-        height = orig_shape[1]
+        width = orig_shape[1]
         # assert height > max(boxes[:, 0]) and height > max(boxes[:, 2]), \
         #     'Bounding box exceeds the border of image {}'.format(im_name)
         boxes_temp = boxes.copy()
         if flip:
-            boxes[:, 2] = height - boxes_temp[:, 0] + 1
-            boxes[:, 0] = height - boxes_temp[:, 2] + 1
+            boxes[:, 2] = width - boxes_temp[:, 0] - 1
+            boxes[:, 0] = width - boxes_temp[:, 2] - 1
 
         boxes[:, :4] *= im_scale
         boxes = torch.Tensor(boxes).float()
