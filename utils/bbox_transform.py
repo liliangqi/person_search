@@ -4,10 +4,6 @@
 # Licensed under The MIT License [see LICENSE for details]
 # Written by Ross Girshick
 # --------------------------------------------------------
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import numpy as np
 import torch
 
@@ -53,10 +49,10 @@ def bbox_transform_inv(boxes, deltas):
     pred_w = torch.exp(dw) * widths.unsqueeze(1)
     pred_h = torch.exp(dh) * heights.unsqueeze(1)
 
-    pred_boxes = torch.cat( \
-        [_.unsqueeze(2) for _ in [pred_ctr_x - 0.5 * pred_w, \
-                                  pred_ctr_y - 0.5 * pred_h, \
-                                  pred_ctr_x + 0.5 * pred_w, \
+    pred_boxes = torch.cat(
+        [_.unsqueeze(2) for _ in [pred_ctr_x - 0.5 * pred_w,
+                                  pred_ctr_y - 0.5 * pred_h,
+                                  pred_ctr_x + 0.5 * pred_w,
                                   pred_ctr_y + 0.5 * pred_h]], 2).view(
         len(boxes), -1)
 

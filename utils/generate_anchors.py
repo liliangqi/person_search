@@ -4,10 +4,6 @@
 # Licensed under The MIT License [see LICENSE for details]
 # Written by Ross Girshick and Sean Bell
 # --------------------------------------------------------
-from __future__ import absolute_import
-from __future__ import division
-from __future__ import print_function
-
 import numpy as np
 
 
@@ -38,8 +34,8 @@ import numpy as np
 #       [ -79., -167.,   96.,  184.],
 #       [-167., -343.,  184.,  360.]])
 
-def generate_anchors(base_size=16, ratios=[0.5, 1, 2],
-                     scales=2 ** np.arange(3, 6)):
+def generate_anchors(base_size=16, ratios=(0.5, 1, 2),
+                     scales=2**np.arange(3, 6)):
     """
     Generate anchor (reference) windows by enumerating aspect ratios X
     scales wrt a reference (0, 0, 15, 15) window.
