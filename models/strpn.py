@@ -3,23 +3,27 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 2, 2018
-# Latest rectified: May 11, 2018
+# Latest rectified: Oct 25, 2018
 # -----------------------------------------------------
 import yaml
 
-import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from torch.autograd import Variable
-import numpy as np
+import torch.nn.functional as func
 import numpy.random as npr
 
-from generate_anchors import generate_anchors
-from losses import smooth_l1_loss
-from bbox_transform import bbox_transform, bbox_transform_inv, clip_boxes, \
-    bbox_overlaps
+from utils.generate_anchors import generate_anchors
+from utils.losses import smooth_l1_loss
+from utils.bbox_transform import *
 from nms.pth_nms import pth_nms as nms
-# from roi_pooling.roi_pool import RoIPoolFunction
+
+
+def spatial_transform(bottom, trans_param):
+    theta = trans_param.view(-1, 2, 3)
+    # TODO: use different pooling size
+    grid = func.affine_grid(theta, bottom.size())
+    transformed = func.grid_sample(bottom, grid)
+
+    return transformed
 
 
 class STRPN(nn.Module):
@@ -44,9 +48,6 @@ class STRPN(nn.Module):
         self.num_anchors = len(self.anchor_scales) * len(self.anchor_ratios)
         self.anchors = None  # to be set in other methods
 
-        pooling_size = self.config['pooling_size']
-        # self.roi_pool = RoIPoolFunction(pooling_size, pooling_size, 1. / 16.)
-
         self.rpn_net = nn.Conv2d(
             net_conv_channels, self.rpn_channels, 3, padding=1)
         self.rpn_cls_score_net = nn.Conv2d(
@@ -66,13 +67,13 @@ class STRPN(nn.Module):
 
             rpn_cls_score = rpn_cls_score.view(-1, 2)
             rpn_label = rpn_label.view(-1)
-            rpn_select = Variable((rpn_label.data != -1)).nonzero().view(-1)
+            rpn_select = (rpn_label.data != -1).nonzero().view(-1)
             rpn_cls_score = rpn_cls_score.index_select(
                 0, rpn_select).contiguous().view(-1, 2)
             rpn_label = rpn_label.index_select(
                 0, rpn_select).contiguous().view(-1)
 
-            rpn_cls_loss = F.cross_entropy(rpn_cls_score, rpn_label)
+            rpn_cls_loss = func.cross_entropy(rpn_cls_score, rpn_label)
             rpn_box_loss = smooth_l1_loss(rpn_bbox_pred, rpn_bbox_info,
                                           sigma=3.0, dim=[1, 2, 3])
             rpn_loss = (rpn_cls_loss, rpn_box_loss)
@@ -82,8 +83,7 @@ class STRPN(nn.Module):
 
             # Crop and resize
             pooled_feat = self.pooling(head_features, rois, max_pool=False)
-            transformed_feat = self.spatial_transform(pooled_feat,
-                                                      roi_trans_param)
+            transformed_feat = spatial_transform(pooled_feat, roi_trans_param)
 
             return pooled_feat, transformed_feat, rpn_loss, label, bbox_info
 
@@ -113,14 +113,6 @@ class STRPN(nn.Module):
             else:
                 raise KeyError(mode)
 
-    def spatial_transform(self, bottom, trans_param):
-        theta = trans_param.view(-1, 2, 3)
-        # TODO: use different pooling size
-        grid = F.affine_grid(theta, bottom.size())
-        transformed = F.grid_sample(bottom, grid)
-
-        return transformed
-
     def pooling(self, bottom, rois, max_pool=True):
         rois = rois.detach()
         x1 = (rois[:, 1::4] / 16.0).squeeze(1)
@@ -132,7 +124,7 @@ class STRPN(nn.Module):
         width = bottom.size(3)
 
         # affine theta
-        theta = Variable(rois.data.new(rois.size(0), 2, 3).zero_())
+        theta = rois.data.new(rois.size(0), 2, 3).zero_()
         theta[:, 0, 0] = (x2 - x1) / (width - 1)
         theta[:, 0, 2] = (x1 + x2 - width + 1) / (width - 1)
         theta[:, 1, 1] = (y2 - y1) / (height - 1)
@@ -141,16 +133,16 @@ class STRPN(nn.Module):
         pooling_size = self.config['pooling_size']
         if max_pool:
             pre_pool_size = pooling_size * 2
-            grid = F.affine_grid(theta, torch.Size(
+            grid = func.affine_grid(theta, torch.Size(
                 (rois.size(0), 1, pre_pool_size, pre_pool_size)))
-            crops = F.grid_sample(
+            crops = func.grid_sample(
                 bottom.expand(rois.size(0), bottom.size(1), bottom.size(2),
                               bottom.size(3)), grid)
-            crops = F.max_pool2d(crops, 2, 2)
+            crops = func.max_pool2d(crops, 2, 2)
         else:
-            grid = F.affine_grid(theta, torch.Size(
+            grid = func.affine_grid(theta, torch.Size(
                 (rois.size(0), 1, pooling_size, pooling_size)))
-            crops = F.grid_sample(
+            crops = func.grid_sample(
                 bottom.expand(rois.size(0), bottom.size(1), bottom.size(2),
                               bottom.size(3)), grid)
 
@@ -159,34 +151,33 @@ class STRPN(nn.Module):
     def anchor_compose(self, height, width):
         anchors = generate_anchors(ratios=np.array(self.anchor_ratios),
                                    scales=np.array(self.anchor_scales))
-        A = anchors.shape[0]
+        num_anchor = anchors.shape[0]
         shift_x = np.arange(0, width) * self.feat_stride
         shift_y = np.arange(0, height) * self.feat_stride
         shift_x, shift_y = np.meshgrid(shift_x, shift_y)
         shifts = np.vstack((shift_x.ravel(), shift_y.ravel(), shift_x.ravel(),
                             shift_y.ravel())).transpose()
-        K = shifts.shape[0]
+        k = shifts.shape[0]
         # width changes faster, so here it is H, W, C
-        anchors = anchors.reshape((1, A, 4)) + shifts.reshape(
-            (1, K, 4)).transpose((1, 0, 2))
-        anchors = anchors.reshape((K * A, 4)).astype(np.float32, copy=False)
-        length = np.int32(anchors.shape[0])
+        anchors = anchors.reshape((1, num_anchor, 4)) + shifts.reshape(
+            (1, k, 4)).transpose((1, 0, 2))
+        anchors = anchors.reshape((k * num_anchor, 4)).astype(
+            np.float32, copy=False)
 
-        return Variable(torch.from_numpy(anchors).cuda())
+        return torch.from_numpy(anchors).cuda()
 
     def region_proposal(self, net_conv, gt_boxes, im_info):
         self.anchors = self.anchor_compose(net_conv.size(2), net_conv.size(3))
-        rpn = F.relu(self.rpn_net(net_conv))
+        rpn = func.relu(self.rpn_net(net_conv))
         rpn_cls_score = self.rpn_cls_score_net(rpn)
         rpn_cls_score_reshape = rpn_cls_score.view(
             1, 2, -1, rpn_cls_score.size()[-1])
-        rpn_cls_prob_reshape = F.softmax(rpn_cls_score_reshape, 1)
+        rpn_cls_prob_reshape = func.softmax(rpn_cls_score_reshape, 1)
         rpn_cls_prob = rpn_cls_prob_reshape.view_as(rpn_cls_score).permute(
             0, 2, 3, 1)
         rpn_cls_score = rpn_cls_score.permute(0, 2, 3, 1)
         rpn_cls_score_reshape = rpn_cls_score_reshape.permute(
             0, 2, 3, 1).contiguous()
-        rpn_cls_pred = torch.max(rpn_cls_score_reshape.view(-1, 2), 1)[1]
 
         rpn_bbox_pred = self.rpn_bbox_pred_net(rpn)
         rpn_bbox_pred = rpn_bbox_pred.permute(0, 2, 3, 1).contiguous()
@@ -248,12 +239,11 @@ class STRPN(nn.Module):
         if post_nms_top_n > 0:
             keep = keep[:post_nms_top_n]
         proposals = proposals[keep, :]
-        scores = scores[keep,]
+        scores = scores[keep, ]
         trans_param = trans_param[keep, :]
 
         # Only support single image as input
-        batch_inds = Variable(
-            proposals.data.new(proposals.size(0), 1).zero_())
+        batch_inds = proposals.data.new(proposals.size(0), 1).zero_()
         blob = torch.cat((batch_inds, proposals), 1)
 
         return blob, scores, trans_param
@@ -290,9 +280,8 @@ class STRPN(nn.Module):
         gt_boxes = gt_boxes.data.cpu().numpy()
         rpn_cls_score = rpn_cls_score.data
 
-        A = self.num_anchors
+        num_anchor = self.num_anchors
         total_anchors = all_anchors.shape[0]
-        K = total_anchors / self.num_anchors
 
         # allow boxes to sit over the edge by a small amount
         _allowed_border = 0
@@ -358,7 +347,6 @@ class STRPN(nn.Module):
                 bg_inds, size=(len(bg_inds) - num_bg), replace=False)
             labels[disable_inds] = -1
 
-        bbox_targets = np.zeros((len(inds_inside), 4), dtype=np.float32)
         bbox_targets = _compute_targets(anchors, gt_boxes[argmax_overlaps, :])
 
         bbox_inside_weights = np.zeros((len(inds_inside), 4), dtype=np.float32)
@@ -392,26 +380,26 @@ class STRPN(nn.Module):
                                       inds_inside, fill=0)
 
         # labels
-        labels = labels.reshape((1, height, width, A)).transpose(0, 3, 1, 2)
-        labels = labels.reshape((1, 1, A * height, width))
-        rpn_labels = Variable(torch.from_numpy(labels).float().cuda()).long()
+        labels = labels.reshape(
+            (1, height, width, num_anchor)).transpose(0, 3, 1, 2)
+        labels = labels.reshape((1, 1, num_anchor * height, width))
+        rpn_labels = torch.from_numpy(labels).float().cuda().long()
 
         # bbox_targets
-        bbox_targets = bbox_targets.reshape((1, height, width, A * 4))
+        bbox_targets = bbox_targets.reshape((1, height, width, num_anchor * 4))
 
-        rpn_bbox_targets = Variable(
-            torch.from_numpy(bbox_targets).float().cuda())
+        rpn_bbox_targets = torch.from_numpy(bbox_targets).float().cuda()
         # bbox_inside_weights
         bbox_inside_weights = bbox_inside_weights.reshape(
-            (1, height, width, A * 4))
-        rpn_bbox_inside_weights = Variable(
-            torch.from_numpy(bbox_inside_weights).float().cuda())
+            (1, height, width, num_anchor * 4))
+        rpn_bbox_inside_weights = torch.from_numpy(
+            bbox_inside_weights).float().cuda()
 
         # bbox_outside_weights
         bbox_outside_weights = bbox_outside_weights.reshape(
-            (1, height, width, A * 4))
-        rpn_bbox_outside_weights = Variable(
-            torch.from_numpy(bbox_outside_weights).float().cuda())
+            (1, height, width, num_anchor * 4))
+        rpn_bbox_outside_weights = torch.from_numpy(
+            bbox_outside_weights).float().cuda()
 
         return rpn_labels, (rpn_bbox_targets, rpn_bbox_inside_weights,
                             rpn_bbox_outside_weights)
@@ -599,7 +587,7 @@ class STRPN(nn.Module):
                 bbox_target_data, num_classes)
 
             return label, roi, roi_score, bbox_tar, bbox_in_weights, p_label, \
-                   tr_param
+                tr_param
 
         # ##################################################################
         # ========================Begin this method=========================
@@ -612,14 +600,14 @@ class STRPN(nn.Module):
         # Include ground-truth boxes in the set of candidate rois
         zeros = rpn_rois.data.new(gt_boxes.size(0), 1)
         all_rois = torch.cat(
-            (Variable(torch.cat((zeros, gt_boxes.data[:, :4]), 1)),
+            (torch.cat((zeros, gt_boxes.data[:, :4]), 1),
              all_rois), 0)
         # this may be a mistake, but all_scores is redundant anyway
-        all_scores = torch.cat((all_scores, Variable(zeros)), 0)
+        all_scores = torch.cat((all_scores, zeros), 0)
         gt_trans_param = torch.FloatTensor([1, 0, 0, 0, 1, 0])
         gt_trans_param = gt_trans_param.expand(gt_boxes.size(0), 6)
         trans_param = torch.cat(
-            (Variable(gt_trans_param).cuda(), trans_param), 0)
+            (gt_trans_param.cuda(), trans_param), 0)
 
         num_images = 1
         rois_per_image = self.config['train_batch_size'] / num_images
@@ -629,13 +617,12 @@ class STRPN(nn.Module):
         # Sample rois with classification labels and bounding box regression
         # targets
         labels, rois, roi_scores, bbox_targets, bbox_inside_weights, \
-        pid_label, trans_param = _sample_rois(
-            all_rois, all_scores, trans_param, gt_boxes, fg_rois_per_image,
-            rois_per_image, _num_classes, self.num_pid)
+            pid_label, trans_param = _sample_rois(
+                all_rois, all_scores, trans_param, gt_boxes, fg_rois_per_image,
+                rois_per_image, _num_classes, self.num_pid)
 
         rois = rois.view(-1, 5)
         assert rois.size(0) == 128
-        roi_scores = roi_scores.view(-1)  # TODO: remove this
         labels = labels.view(-1, 1)
         bbox_targets = bbox_targets.view(-1, _num_classes * 4)
         bbox_inside_weights = bbox_inside_weights.view(-1, _num_classes * 4)
@@ -644,9 +631,10 @@ class STRPN(nn.Module):
         labels = labels.long()
         pid_label = pid_label.long()
 
-        return rois, (labels, pid_label), trans_param, \
-               (Variable(bbox_targets), Variable(bbox_inside_weights),
-                Variable(bbox_outside_weights))
+        returns = (rois, (labels, pid_label), trans_param,
+                   (bbox_targets, bbox_inside_weights, bbox_outside_weights))
+
+        return returns
 
     def initialize_weight(self, trun):
         def normal_init(m, mean, stddev, truncated=False):

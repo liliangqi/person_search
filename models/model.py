@@ -3,18 +3,18 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectified: Aug 7, 2018
+# Latest rectified: Oct 25, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
+import torch.nn.functional as func
 import yaml
 
-from vgg16 import Vgg16
-from resnet import resnet
-from densenet import densenet
-from strpn import STRPN
-from losses import oim_loss, smooth_l1_loss
+from .vgg16 import Vgg16
+from .resnet import MyResNet
+from .densenet import DenseNet
+from .strpn import STRPN
+from utils.losses import oim_loss, smooth_l1_loss
 
 
 class SIPN(nn.Module):
@@ -43,13 +43,13 @@ class SIPN(nn.Module):
         if self.net_name == 'vgg16':
             self.net = Vgg16(pre_model, self.is_train)
         elif self.net_name == 'res34':
-            self.net = resnet(34, pre_model, self.is_train)
+            self.net = MyResNet(34, pre_model, self.is_train)
         elif self.net_name == 'res50':
-            self.net = resnet(50, pre_model, self.is_train)
+            self.net = MyResNet(50, pre_model, self.is_train)
         elif self.net_name == 'dense121':
-            self.net = densenet(121, pre_model, self.is_train)
+            self.net = DenseNet(121, pre_model, self.is_train)
         elif self.net_name == 'dense161':
-            self.net = densenet(161, pre_model, self.is_train)
+            self.net = DenseNet(161, pre_model, self.is_train)
         else:
             raise KeyError(self.net_name)
 
@@ -80,16 +80,13 @@ class SIPN(nn.Module):
             cls_score = self.cls_score_net(fc7)
             bbox_pred = self.bbox_pred_net(fc7)
 
-            reid_fc7 = self.tail(trans_feat).mean(3).mean(2)
-            reid_feat = F.normalize(self.reid_feat_net(reid_fc7))
-            # reid_feat = F.normalize(self.reid_feat_net(fc7))
+            # reid_fc7 = self.tail(trans_feat).mean(3).mean(2)
+            # reid_feat = F.normalize(self.reid_feat_net(reid_fc7))
+            reid_feat = func.normalize(self.reid_feat_net(fc7))
 
-            cls_pred = torch.max(cls_score, 1)[1]
-            cls_prob = F.softmax(cls_score, 1)
             det_label, pid_label = label
-
             det_label = det_label.view(-1)
-            cls_loss = F.cross_entropy(cls_score.view(-1, 2), det_label)
+            cls_loss = func.cross_entropy(cls_score.view(-1, 2), det_label)
             bbox_loss = smooth_l1_loss(bbox_pred, bbox_info)
             reid_loss = oim_loss(reid_feat, pid_label, self.lut, self.queue,
                                  gt_boxes.size(0), self.lut_momentum)
@@ -110,12 +107,11 @@ class SIPN(nn.Module):
                 cls_score = self.cls_score_net(fc7)
                 bbox_pred = self.bbox_pred_net(fc7)
 
-                reid_fc7 = self.tail(trans_feat).mean(3).mean(2)
-                reid_feat = F.normalize(self.reid_feat_net(reid_fc7))
-                # reid_feat = F.normalize(self.reid_feat_net(fc7))
+                # reid_fc7 = self.tail(trans_feat).mean(3).mean(2)
+                # reid_feat = F.normalize(self.reid_feat_net(reid_fc7))
+                reid_feat = func.normalize(self.reid_feat_net(fc7))
 
-                cls_pred = torch.max(cls_score, 1)[1]
-                cls_prob = F.softmax(cls_score, 1)
+                cls_prob = func.softmax(cls_score, 1)
 
                 with open('config.yml', 'r') as f:
                     config = yaml.load(f)
@@ -143,7 +139,7 @@ class SIPN(nn.Module):
                     fc7 = self.tail(pooled_feat)
                 else:
                     fc7 = self.tail(pooled_feat).mean(3).mean(2)
-                reid_feat = F.normalize(self.reid_feat_net(fc7))
+                reid_feat = func.normalize(self.reid_feat_net(fc7))
 
                 return reid_feat.data.cpu().numpy()
 
@@ -157,7 +153,7 @@ class SIPN(nn.Module):
     def init_linear_weight(self, trun):
         def normal_init(m, mean, stddev, truncated=False):
             """
-            weight initalizer: truncated normal and random normal.
+            weight initializer: truncated normal and random normal.
             """
             # x is a parameter
             if truncated:
@@ -171,7 +167,6 @@ class SIPN(nn.Module):
         normal_init(self.bbox_pred_net, 0, 0.001, trun)
         # TODO: change 0.01 for reid_feat_net
         normal_init(self.reid_feat_net, 0, 0.01, trun)
-
 
     def load_trained_model(self, state_dict):
         nn.Module.load_state_dict(

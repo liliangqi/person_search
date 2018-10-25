@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: May 6, 2018
-# Latest rectifying: May 6, 2018
+# Latest rectifying: Oct 25, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn

@@ -3,14 +3,14 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 28, 2018
-# Latest rectifying: Apr 29, 2018
+# Latest rectifying: Oct 25, 2018
 # -----------------------------------------------------
 import torch.nn as nn
 from torchvision import models
 import yaml
 
 
-class densenet:
+class DenseNet:
 
     def __init__(self, num_layers=121, pre_model=None, training=True):
         self.training = training
@@ -70,8 +70,8 @@ class densenet:
         def set_bn_fix(m):
             class_name = m.__class__.__name__
             if class_name.find('BatchNorm') != -1:
-                for p in m.parameters():
-                    p.requires_grad = False
+                for param in m.parameters():
+                    param.requires_grad = False
 
         self.model.apply(set_bn_fix)
 

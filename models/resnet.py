@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectifying: May 6, 2018
+# Latest rectifying: Oct 25, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -13,8 +13,8 @@ import torch.utils.model_zoo as model_zoo
 import yaml
 
 
-__all__ = ['ResNet', 'resnet18', 'resnet34', 'resnet50', 'resnet101',
-           'resnet152']
+__all__ = ['ResNet', 'MyResNet', 'resnet18', 'resnet34', 'resnet50',
+           'resnet101', 'resnet152']
 
 root_url = 'https://s3.amazonaws.com/pytorch/models/'
 model_urls = {
@@ -139,8 +139,7 @@ class ResNet(nn.Module):
                 nn.BatchNorm2d(planes * block.expansion),
             )
 
-        layers = []
-        layers.append(block(self.inplanes, planes, stride, downsample))
+        layers = [block(self.inplanes, planes, stride, downsample)]
         self.inplanes = planes * block.expansion
         for i in range(1, blocks):
             layers.append(block(self.inplanes, planes))
@@ -203,7 +202,7 @@ def resnet152(pretrained=False):
     return model
 
 
-class resnet:
+class MyResNet:
 
     def __init__(self, num_layers=50, pre_model=None, training=True):
         self.training = training
@@ -259,8 +258,8 @@ class resnet:
         def set_bn_fix(m):
             class_name = m.__class__.__name__
             if class_name.find('BatchNorm') != -1:
-                for p in m.parameters():
-                    p.requires_grad = False
+                for param in m.parameters():
+                    param.requires_grad = False
 
         self.model.apply(set_bn_fix)
 
