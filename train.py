@@ -97,8 +97,11 @@ def train_model(dataloader, net, optimizer, epoch):
             for tag, value in net.named_parameters():
                 tag = tag.replace('.', '/')
                 tensor_logger.hist_summary(tag, value.data.cpu().numpy(), step)
-                tensor_logger.hist_summary(
-                    tag + '/grad', value.grad.data.cpu().numpy(), step)
+                if value.requires_grad:
+                    if value.grad is None:
+                        continue
+                    tensor_logger.hist_summary(
+                        tag + '/grad', value.grad.data.cpu().numpy(), step)
 
         torch.cuda.empty_cache()
 
