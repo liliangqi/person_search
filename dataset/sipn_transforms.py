@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Aug 8, 2018
-# Latest rectifying: Aug 9, 2018
+# Latest rectifying: Oct 26, 2018
 # -----------------------------------------------------
 import random
 
@@ -19,7 +19,7 @@ class Compose:
         self.transforms = transforms
 
     def __call__(self, im):
-        im_scale = 0
+        im_scale = 1
         flip = False
         for t in self.transforms:
             if isinstance(t, Scale):

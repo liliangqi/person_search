@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 28, 2018
-# Latest rectified: Aug 7, 2018
+# Latest rectified: Oct 26, 2018
 # -----------------------------------------------------
 import os
 import os.path as osp
@@ -12,14 +12,12 @@ import time
 import yaml
 import pandas as pd
 import cv2
-import PIL
-import random
 import numpy as np
 import torch
 from torch.utils.data import Dataset
 from sklearn.metrics import average_precision_score, precision_recall_curve
-import pickle
-import matplotlib.pyplot as plt
+import dataset.sipn_transforms as sipn_transforms
+# import matplotlib.pyplot as plt
 
 
 def _compute_iou(a, b):
@@ -63,6 +61,42 @@ def pre_process_image(im_path, flipped=False, copy=False):
     return im, im_scale, orig_shape
 
 
+class SIPNQueryDataset(Dataset):
+
+    def __init__(self, root_dir, transform=None):
+        self.root_dir = root_dir
+        self.transform = transform
+
+        self.image_dir = os.path.join(self.root_dir, 'frames')
+        self.anno_dir = os.path.join(self.root_dir, 'SIPN_annotation')
+        self.query_boxes = pd.read_csv(os.path.join(
+            self.anno_dir, 'queryDF.csv'))
+
+    def __len__(self):
+        return self.query_boxes.shape[0]
+
+    def __getitem__(self, index):
+        im_name = self.query_boxes.loc[index, 'imname']
+        im_path = os.path.join(self.image_dir, im_name)
+        box = self.query_boxes.loc[index, 'x1': 'del_y'].copy()
+        box['del_x'] += box['x1']
+        box['del_y'] += box['y1']
+        box = box.values.astype(np.float32)
+
+        im = cv2.imread(im_path).astype(np.float32)
+        if self.transform is not None:
+            im, im_scale, _ = self.transform(im)
+        else:
+            im_scale = 1
+        im_info = np.array(
+            [im.shape[1], im.shape[2], im_scale], dtype=np.float32)
+
+        box *= im_scale
+        box = torch.Tensor(box).float()
+
+        return im, (box, im_info)
+
+
 class SIPNDataset(Dataset):
 
     def __init__(self, root_dir, dataset_name, split, transform=None):
@@ -81,14 +115,12 @@ class SIPNDataset(Dataset):
         self.image_dir = os.path.join(self.root_dir, 'frames')
         self.anno_dir = os.path.join(self.root_dir, 'SIPN_annotation')
         self.imnames_file = '{}ImnamesSe.csv'.format(self.split)
-        self.train_imnamesDF_file = 'trainImnamesDF.csv'
         self.all_boxes_file = '{}AllDF.csv'.format(self.split)
-        self.query_file = 'queryDF.csv'
 
-        self.imnames = pd.read_csv(os.path.join(
-            self.anno_dir, self.imnames_file), header=None, squeeze=True)
         self.all_boxes = pd.read_csv(os.path.join(
             self.anno_dir, self.all_boxes_file))
+        self.imnames = pd.read_csv(os.path.join(
+                self.anno_dir, self.imnames_file), header=None, squeeze=True)
 
         if self.dataset_name == 'sysu':
             self.gallery_sizes = [50, 100, 500, 1000, 2000, 4000]
@@ -113,22 +145,15 @@ class SIPNDataset(Dataset):
 
         im = cv2.imread(im_path).astype(np.float32)
         orig_shape = im.shape
-        im, im_scale, flip = self.transform(im)
+        if self.transform is not None:
+            im, im_scale, flip = self.transform(im)
+        else:
+            im_scale = 1
+            flip = False
         im_info = np.array(
             [im.shape[1], im.shape[2], im_scale], dtype=np.float32)
 
-        # flip = random.random() < 0.5 if self.split == 'train' else False
-        # im, im_scale, orig_shape = pre_process_image(im_path, flip)
-        # if im.ndim == 4:
-        #     im = im.squeeze(0)
-        # im_info = np.array([im.shape[0], im.shape[1], im_scale],
-        #                    dtype=np.float32)
-        # im = im.transpose([2, 0, 1])
-        # im = torch.Tensor(im).float()
-
         width = orig_shape[1]
-        # assert height > max(boxes[:, 0]) and height > max(boxes[:, 2]), \
-        #     'Bounding box exceeds the border of image {}'.format(im_name)
         boxes_temp = boxes.copy()
         if flip:
             boxes[:, 2] = width - boxes_temp[:, 0] - 1
@@ -137,249 +162,30 @@ class SIPNDataset(Dataset):
         boxes[:, :4] *= im_scale
         boxes = torch.Tensor(boxes).float()
 
-        return im, (boxes, im_info)
-
-
-class PersonSearchDataset:
-
-    def __init__(self, root_dir, dataset_name, split_name='train',
-                 gallery_size=100, test_mode='gallery'):
-        """
-        create person search dataset
-        ---
-        param:
-            root_dir: root direction for the raw dataset
-            split_name: 'train' or 'test'
-        """
-        self.root_dir = root_dir
-        self.dataset_name = dataset_name
-        self.split = split_name
-        self.images_dir = osp.join(self.root_dir, 'frames')
-        self.annotation_dir = osp.join(self.root_dir, 'SIPN_annotation')
-        self.cache_dir = osp.join(self.annotation_dir, 'cache')
-
-        self.train_imnames_file = 'trainImnamesSe.csv'
-        self.train_imnamesDF_file = 'trainImnamesDF.csv'
-        self.test_imnames_file = 'testImnamesSe.csv'
-        self.train_all_file = 'trainAllDF.csv'
-        self.test_all_file = 'testAllDF.csv'
-        self.query_file = 'queryDF.csv'
-        if self.dataset_name == 'sysu':
-            self.gallery_sizes = [50, 100, 500, 1000, 2000, 4000]
-            self.num_pid = 5532
-        elif self.dataset_name == 'prw':
-            self.gallery_sizes = [200, 500, 1000, 2000, 4000]
-            self.num_pid = 483
-        else:
-            raise KeyError(self.dataset_name)
-
-        if not osp.exists(self.cache_dir):
-            os.mkdir(self.cache_dir)
-
         if self.split == 'train':
-            if self.train_imnamesDF_file in os.listdir(self.cache_dir) and \
-                    self.train_all_file in os.listdir(self.cache_dir):
-                self.train_imnames = pd.read_csv(
-                    osp.join(self.cache_dir, self.train_imnamesDF_file))
-                self.train_all = pd.read_csv(
-                    osp.join(self.cache_dir, self.train_all_file))
-            else:
-                self.train_imnames, self.train_all = self.prepare_training()
-            self.train_imnames_list = list(range(self.train_imnames.shape[0]))
-            # random.shuffle(self.train_imnames_list)  # shuffle the list
-            self.train_imnames_list_equip = self.train_imnames_list[:]
-            self.num_train_images = self.train_imnames.shape[0]
-
+            return im, (boxes, im_info)
         elif self.split == 'test':
-            self.test_imnames = pd.read_csv(
-                osp.join(self.annotation_dir, self.test_imnames_file),
-                header=None, squeeze=True)
-            self.test_all = pd.read_csv(
-                osp.join(self.annotation_dir, self.test_all_file))
-            q_to_g_file = 'q_to_g' + str(gallery_size) + 'DF.csv'
-            self.queries_to_galleries = pd.read_csv(
-                osp.join(self.annotation_dir, q_to_g_file))
-            self.query_boxes = pd.read_csv(osp.join(
-                self.annotation_dir, self.query_file))
-            self.delta_to_coordinates()
-            self.num_test_images = self.test_imnames.shape[0]
-            self.test_imnames_list = list(range(self.num_test_images))[::-1]
-
-            self.test_mode = test_mode
-            if self.test_mode == 'query':
-                self.query_imnames_list = list(range(
-                    self.queries_to_galleries.shape[0]))[::-1]
-
-        else:
-            raise KeyError(self.split)
-
-    def delta_to_coordinates(self):
-        """change `del_x` and `del_y` to `x2` and `y2` for testing set"""
-        self.test_all['del_x'] += self.test_all['x1']
-        self.test_all['del_y'] += self.test_all['y1']
-        self.test_all.rename(columns={'del_x': 'x2', 'del_y': 'y2'},
-                             inplace=True)
-        self.query_boxes['del_x'] += self.query_boxes['x1']
-        self.query_boxes['del_y'] += self.query_boxes['y1']
-        self.query_boxes.rename(columns={'del_x': 'x2', 'del_y': 'y2'},
-                                inplace=True)
-
-    def prepare_training(self):
-        """prepare dataset for training, including flipping, resizing"""
-
-        def flip_bbox(subset, train_al, hei_and_wid):
-            """flip bboxes only"""
-            subset = pd.merge(subset, hei_and_wid)
-            subset['x1'] = subset['width'] - train_al['x2'] - 1
-            subset['x2'] = subset['width'] - train_al['x1'] - 1
-            assert (subset['x2'] >= subset['x1']).all()
-            del subset['width']
-            del subset['height']
-            subset['flipped'] = [1 for _ in range(subset.shape[0])]
-
-            return subset
-
-        train_imnames = pd.read_csv(osp.join(self.annotation_dir,
-                                             self.train_imnames_file),
-                                    header=None, squeeze=True)
-        train_all = pd.read_csv(osp.join(self.annotation_dir,
-                                         self.train_all_file))
-
-        # formal
-        widths = [PIL.Image.open(osp.join(self.images_dir, imname)).size[0]
-                  for imname in train_imnames]
-        heights = [PIL.Image.open(osp.join(self.images_dir, imname)).size[1]
-                   for imname in train_imnames]
-        heights_and_widths = pd.DataFrame({'imname': train_imnames,
-                                           'width': widths,
-                                           'height': heights})
-
-        # # ==========================debug============================
-        # heights_and_widths = pd.read_csv(
-        #     osp.join(self.annotation_dir, 'heights_and_widthsDF.csv'))
-        # # ===========================end=============================
-
-        # change `del_x` and `del_y` to `x2` and `y2`
-        train_all['del_x'] += train_all['x1']
-        train_all['del_y'] += train_all['y1']
-        train_all.rename(columns={'del_x': 'x2', 'del_y': 'y2'}, inplace=True)
-
-        # horizontally flip bounding boxes
-        flipped = [0 for _ in range(train_all.shape[0])]
-        train_all['flipped'] = flipped
-        train_add = train_all.copy()
-        train_add = flip_bbox(train_add, train_all, heights_and_widths)
-        train_all = pd.concat((train_all, train_add))
-        train_all.index = range(train_all.shape[0])
-
-        flipped = [0 for _ in range(train_imnames.size)]
-        train_imnames_not = pd.DataFrame({'imname': train_imnames,
-                                          'flipped': flipped})
-        # change the order of columns
-        train_imnames_not = train_imnames_not[['imname', 'flipped']]
-        flipped = [1 for _ in range(train_imnames.size)]
-        train_imnames_fl = pd.DataFrame({'imname': train_imnames,
-                                         'flipped': flipped})
-        train_imnames_fl = train_imnames_fl[['imname', 'flipped']]
-        train_imnames = pd.concat((train_imnames_fl, train_imnames_not))
-        train_imnames.index = range(train_imnames.shape[0])
-
-        train_imnames.to_csv(osp.join(self.cache_dir, 'trainImnamesDF.csv'),
-                             index=False)
-        train_all.to_csv(osp.join(self.cache_dir, 'trainAllDF.csv'),
-                         index=False)
-
-        return train_imnames, train_all
-
-    def next(self):
-        if self.split == 'train':
-
-            # Prepare for the next epoch
-            if len(self.train_imnames_list) == 0:
-                self.train_imnames_list = self.train_imnames_list_equip[:]
-                # self.train_imnames = pd.read_csv(
-                #     osp.join(self.cache_dir, self.train_imnamesDF_file))
-
-            chosen = self.train_imnames_list.pop(0)
-            im_name, flipped = self.train_imnames.loc[chosen]
-            im_path = osp.join(self.images_dir, im_name)
-
-            im, im_scale, _ = pre_process_image(im_path, flipped=flipped)
-
-            df = self.train_all.copy()
-            # TODO: use panda.query
-            df = df[df['imname'] == im_name]
-            df = df[df['flipped'] == flipped]
-            gt_boxes = df.loc[:, 'x1': 'pid']
-            gt_boxes.loc[:, 'x1': 'y2'] *= im_scale
-            gt_boxes = gt_boxes.values
-
-            im_info = np.array([im.shape[1], im.shape[2], im_scale],
-                               dtype=np.float32)
-
-            return im, gt_boxes, im_info
-
-        elif self.split == 'test':
-            if self.test_mode == 'gallery':
-                chosen = self.test_imnames_list.pop()
-                im_name = self.test_imnames.loc[chosen]
-                im_path = osp.join(self.images_dir, im_name)
-
-                im, im_scale, orig_shape = pre_process_image(im_path,
-                                                             copy=True)
-
-                im_info = np.array([im.shape[1], im.shape[2], im_scale],
-                                   dtype=np.float32)
-
-                return im, im_info, orig_shape
-
-            elif self.test_mode == 'query':
-                chosen = self.query_imnames_list.pop()
-                im_name = self.query_boxes.iloc[chosen, 0]
-                im_path = osp.join(self.images_dir, im_name)
-
-                im, im_scale, _ = pre_process_image(im_path, copy=True)
-
-                df = self.query_boxes.copy()
-                gt_boxes = df.ix[chosen, 'x1': 'y2'] * im_scale
-                gt_boxes = gt_boxes.as_matrix().astype(np.float64)
-
-                im_info = np.array([im.shape[1], im.shape[2], im_scale],
-                                   dtype=np.float32)
-
-                return im, gt_boxes, im_info
-
-            else:
-                raise KeyError(self.test_mode)
-
-        else:
-            raise KeyError(self.split)
-
-    def test_image_path(self, i):
-        return osp.join(self.images_dir, self.test_imnames.iloc[i])
-
-    def __len__(self):
-        if self.split == 'train':
-            return self.num_train_images
-        elif self.split == 'test':
-            return self.num_test_images
+            return im, (orig_shape, im_info)
         else:
             raise KeyError(self.split)
 
     def evaluate_detections(self, gallery_det, det_thresh=0.5, iou_thresh=0.5,
                             labeled_only=False):
         """evaluate the results of the detection"""
-        assert self.test_imnames.shape[0] == len(gallery_det)
+        assert self.imnames.shape[0] == len(gallery_det)
 
         y_true, y_score = [], []
         count_gt, count_tp = 0, 0
-        df = self.test_all.copy()
+        df = self.all_boxes.copy()
         for k in range(len(gallery_det)):
-            im_name = self.test_imnames.iloc[k]
+            im_name = self.imnames.iloc[k]
             gt = df[df['imname'] == im_name]
-            gt_boxes = gt.loc[:, 'x1': 'y2'].values
+            gt_boxes = gt.loc[:, 'x1': 'del_y'].copy()
+            gt_boxes.loc[:, 'del_x'] += gt_boxes.loc[:, 'x1']
+            gt_boxes.loc[:, 'del_y'] += gt_boxes.loc[:, 'y1']
+            gt_boxes = gt_boxes.values
             if labeled_only:
-                pass # TODO
+                pass  # TODO
             det = np.asarray(gallery_det[k])
             inds = np.where(det[:, 4].ravel() >= det_thresh)[0]
             det = det[inds]
@@ -422,25 +228,29 @@ class PersonSearchDataset:
         # plt.plot(recall, precision)
         # plt.savefig('pr.jpg')
 
-        print(
-            '{} detection:'.format('labeled only' if labeled_only else 'all'))
+        print('{} detection:'.format(
+            'labeled only' if labeled_only else 'all'))
         print('  recall = {:.2%}'.format(det_rate))
         if not labeled_only:
             print('  ap = {:.2%}'.format(ap))
 
     def evaluate_search(self, gallery_det, gallery_feat, probe_feat,
-                        det_thresh=0.5, gallery_size=100, dump_json=None):
-        assert self.test_imnames.shape[0] == len(gallery_det)
-        assert self.test_imnames.shape[0] == len(gallery_feat)
-        assert self.queries_to_galleries.shape[0] == len(probe_feat)
+                        det_thresh=0.5, gallery_size=100):
+        assert self.imnames.shape[0] == len(gallery_det)
+        assert self.imnames.shape[0] == len(gallery_feat)
+
+        query_boxes = pd.read_csv(osp.join(self.anno_dir, 'queryDF.csv'))
+        q_to_g_file = 'q_to_g' + str(gallery_size) + 'DF.csv'
+        queries_to_galleries = pd.read_csv(osp.join(
+            self.anno_dir, q_to_g_file))
+        assert queries_to_galleries.shape[0] == len(probe_feat)
 
         use_full_set = gallery_size == -1
-        df = self.test_all.copy()
+        df = self.all_boxes.copy()
 
         # ====================formal=====================
         name_to_det_feat = {}
-        for name, det, feat in zip(self.test_imnames,
-                                   gallery_det, gallery_feat):
+        for name, det, feat in zip(self.imnames, gallery_det, gallery_feat):
             scores = det[:, 4].ravel()
             inds = np.where(scores >= det_thresh)[0]
             if len(inds) > 0:
@@ -456,8 +266,9 @@ class PersonSearchDataset:
         topk = [1, 5, 10]
         # ret  # TODO: save json
         for i in range(len(probe_feat)):
-            pid = self.query_boxes.ix[i, 'pid']
-            num_g = self.query_boxes.ix[i, 'num_g']
+            pid = int(query_boxes.ix[i, 'pid'])
+            assert isinstance(pid, int)
+            num_g = query_boxes.ix[i, 'num_g']
             y_true, y_score = [], []
             imgs, rois = [], []
             count_gt, count_tp = 0, 0
@@ -465,7 +276,7 @@ class PersonSearchDataset:
             feat_p = probe_feat[i].ravel()
             # Ignore the probe image
             start = time.time()
-            probe_imname = self.queries_to_galleries.iloc[i, 0]
+            probe_imname = queries_to_galleries.iloc[i, 0]
             # probe_roi = df[df['imname'] == probe_imname]
             # probe_roi = probe_roi[probe_roi['is_query'] == 1]
             # probe_roi = probe_roi[probe_roi['pid'] == pid]
@@ -474,18 +285,22 @@ class PersonSearchDataset:
             tested = set([probe_imname])
             # 1. Go through the gallery samples defined by the protocol
             for g_i in range(1, gallery_size + 1):
-                gallery_imname = self.queries_to_galleries.iloc[i, g_i]
+                gallery_imname = queries_to_galleries.iloc[i, g_i]
                 # gt = df[df['imname'] == gallery_imname]
                 # gt = gt[gt['pid'] == pid]  # important
                 # gt = gt.loc[:, 'x1': 'y2']
                 if g_i <= num_g:
                     gt = df.query('imname==@gallery_imname and pid==@pid')
-                    gt = gt.loc[:, 'x1': 'y2'].as_matrix().ravel()
+                    gt = gt.loc[:, 'x1': 'del_y'].copy()
+                    gt.loc[:, 'del_x'] += gt.loc[:, 'x1']
+                    gt.loc[:, 'del_y'] += gt.loc[:, 'y1']
+                    gt = gt.values.ravel()
                 else:
                     gt = np.array([])
                 count_gt += (gt.size > 0)
                 # compute distance between probe and gallery dets
-                if gallery_imname not in name_to_det_feat: continue
+                if gallery_imname not in name_to_det_feat:
+                    continue
                 det, feat_g = name_to_det_feat[gallery_imname]
                 # get L2-normalized feature matrix NxD
                 assert feat_g.size == np.prod(feat_g.shape[:2])
@@ -544,20 +359,13 @@ class PersonSearchDataset:
 
 if __name__ == '__main__':
 
-    rtdir = '/Users/liliangqi/Desktop/person_search/dataset'
-    size = 100
-    sysu = PersonSearchDataset(rtdir, split_name='test', gallery_size=size)
+    rtdir = '/home/liliangqi/hdd/datasets/cuhk_sysu'
 
-    output_dir = './data/test_result'
-    gboxes_file = open(os.path.join(output_dir, 'gboxes.pkl'), 'rb')
-    gboxes = pickle.load(gboxes_file, encoding='iso-8859-1')
-    gfeatures_file = open(os.path.join(output_dir, 'gfeatures.pkl'), 'rb')
-    gfeatures = pickle.load(gfeatures_file, encoding='iso-8859-1')
-    pfeatures_file = open(os.path.join(output_dir, 'pfeatures.pkl'), 'rb')
-    pfeatures = pickle.load(pfeatures_file, encoding='iso-8859-1')
-    # sysu.evaluate_detections(gboxes)
-    sysu.evaluate_search(gboxes, gfeatures['feat'], pfeatures['feat'],
-                         det_thresh=0.5, gallery_size=size, dump_json=None)
-    gboxes_file.close()
-    gfeatures_file.close()
-    pfeatures_file.close()
+    cur_transform = sipn_transforms.Compose([
+        sipn_transforms.Scale(600, 1000),
+        sipn_transforms.ToTensor(),
+        sipn_transforms.Normalize([102.9801, 115.9465, 122.7717])
+    ])
+    gallery_dataset = SIPNDataset(rtdir, 'sysu', 'test', cur_transform)
+
+    print('Debug')
