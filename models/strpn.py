@@ -97,8 +97,8 @@ class STRPN(nn.Module):
 
                 # Crop and resize
                 pooled_feat = self.pooling(head_features, rois, max_pool=False)
-                transformed_feat = self.spatial_transform(pooled_feat,
-                                                          roi_trans_param)
+                transformed_feat = spatial_transform(
+                    pooled_feat, roi_trans_param)
                 return rois, pooled_feat, transformed_feat
 
             elif mode == 'query':
