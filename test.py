@@ -6,20 +6,21 @@
 # Latest rectified: Aug 8, 2018
 # -----------------------------------------------------
 import os
-import argparse
-import pickle
-
-import numpy as np
-import torch
-import yaml
-from torch.autograd import Variable
 import time
 
-from dataset.sipn_dataset import PersonSearchDataset
-from model import SIPN
-from bbox_transform import bbox_transform_inv
+import argparse
+import yaml
+import pickle
+import numpy as np
+import torch
+from torch.utils.data import DataLoader
+
+from dataset.sipn_dataset import SIPNQueryDataset, SIPNDataset
+import dataset.sipn_transforms as sipn_transforms
+from models.model import SIPN
+from utils.bbox_transform import bbox_transform_inv
 from nms.pth_nms import pth_nms as nms
-from __init__ import clock_non_return
+from utils.utils import clock_non_return, clip_boxes
 
 
 def parse_args():
@@ -27,7 +28,7 @@ def parse_args():
 
     parser = argparse.ArgumentParser(description='Testing')
     parser.add_argument('--net', default='res50', type=str)
-    parser.add_argument('--trained_epochs', default='14', type=str)
+    parser.add_argument('--epochs', default='20', type=str)
     parser.add_argument('--gpu_ids', default='0', type=str)
     parser.add_argument('--data_dir', default='', type=str)
     parser.add_argument('--out_dir', default='./output', type=str)
@@ -40,58 +41,24 @@ def parse_args():
     return args
 
 
-def cuda_mode(args):
-    """set cuda"""
-    if torch.cuda.is_available() and '-1' not in args.gpu_ids:
-        cuda = True
-        str_ids = args.gpu_ids.split(',')
-        gpu_ids = []
-        for str_id in str_ids:
-            gid = int(str_id)
-            if gid >= 0:
-                gpu_ids.append(gid)
-
-        if len(gpu_ids) > 0:
-            torch.cuda.set_device(gpu_ids[0])
-    else:
-        cuda = False
-
-    return cuda
-
-
-def clip_boxes(boxes, im_shape):
-    """Clip boxes to image boundaries."""
-    # x1 >= 0
-    boxes[:, 0::4] = np.maximum(boxes[:, 0::4], 0)
-    # y1 >= 0
-    boxes[:, 1::4] = np.maximum(boxes[:, 1::4], 0)
-    # x2 < im_shape[1]
-    boxes[:, 2::4] = np.minimum(boxes[:, 2::4], im_shape[1] - 1)
-    # y2 < im_shape[0]
-    boxes[:, 3::4] = np.minimum(boxes[:, 3::4], im_shape[0] - 1)
-    return boxes
-
-
-def test_gallery(net, dataset, use_cuda, output_dir, thresh=0.):
+def test_gallery(net, dataloader, output_dir, thresh=0.):
     """test gallery images"""
 
     with open('config.yml', 'r') as f:
         config = yaml.load(f)
 
-    num_images = len(dataset)
+    num_images = len(dataloader.dataset)
     all_boxes = [0 for _ in range(num_images)]
     all_features = [0 for _ in range(num_images)]
+    net.eval()
     start = time.time()
 
-    for i in range(num_images):
-        im, im_info, orig_shape = dataset.next()
-        im = im.transpose([0, 3, 1, 2])
-
+    for i, data in enumerate(dataloader):
         with torch.no_grad():
-            if use_cuda:
-                im = Variable(torch.from_numpy(im).cuda())
-            else:
-                im = Variable(torch.from_numpy(im))
+            im, (orig_shape, im_info) = data
+            im = im.to(device)
+            im_info = im_info.numpy().squeeze(0)
+            orig_shape = [x.item() for x in orig_shape]
 
             scores, bbox_pred, rois, features = net.forward(im, None, im_info)
 
@@ -138,29 +105,23 @@ def test_gallery(net, dataset, use_cuda, output_dir, thresh=0.):
     return all_boxes, all_features
 
 
-def test_query(net, dataset, use_cuda, output_dir):
+def test_query(net, dataloader, output_dir):
     """Test query images"""
 
-    # TODO: use __len__()
-    num_images = dataset.queries_to_galleries.shape[0]
+    num_images = len(dataloader.dataset)
     all_features = [0 for _ in range(num_images)]
     start = time.time()
+    net.eval()
 
-    for i in range(num_images):
-        im, roi, im_info = dataset.next()
-
-        im = im.transpose([0, 3, 1, 2])
+    for i, data in enumerate(dataloader):
+        im, (roi, im_info) = data
+        roi = roi.numpy()
         roi = np.hstack(([[0]], roi.reshape(1, 4)))
+        im = im.to(device)
+        roi = torch.from_numpy(roi).float().to(device)
 
         with torch.no_grad():
-            if use_cuda:
-                im = Variable(torch.from_numpy(im).cuda())
-                roi = Variable(torch.from_numpy(roi).float().cuda())
-            else:
-                im = Variable(torch.from_numpy(im))
-                roi = Variable(torch.from_numpy(roi).float())
-
-        features = net.forward(im, roi, im_info, dataset.test_mode)
+            features = net.forward(im, roi, im_info, 'query')
         all_features[i] = features[0]  # TODO: check this
 
         end = time.time()
@@ -180,11 +141,25 @@ def main():
 
     opt = parse_args()
     size = opt.gallery_size
-    test_result_dir = os.path.join(opt.out_dir, opt.dataset_name,
-                                   'test_result')
+    test_result_dir = os.path.join(
+        opt.out_dir, opt.dataset_name, 'test_result')
 
-    dataset_gallery = PersonSearchDataset(opt.data_dir, opt.dataset_name,
-                                          split_name='test', gallery_size=size)
+    # Read the configuration file
+    with open('config.yml', 'r') as f:
+        config = yaml.load(f)
+    target_size = config['target_size']
+    max_size = config['max_size']
+    pixel_means = config['pixel_means']
+
+    # Compose transformations for the dataset
+    transform = sipn_transforms.Compose([
+        sipn_transforms.Scale(target_size, max_size),
+        sipn_transforms.ToTensor(),
+        sipn_transforms.Normalize(pixel_means)
+    ])
+
+    dataset_gallery = SIPNDataset(
+        opt.data_dir, opt.dataset_name, 'test', transform)
 
     if opt.use_saved_result:
         gboxes_file = open(os.path.join(test_result_dir, 'gboxes.pkl'), 'rb')
@@ -197,39 +172,37 @@ def main():
         q_features = pickle.load(qfeatures_file)
 
     else:
-        use_cuda = cuda_mode(opt)
+        global device
+        device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
+        trained_model_name = 'sipn_' + opt.net + '_' + opt.epochs + '.tar'
         trained_model_dir = os.path.join(
-            opt.out_dir, opt.dataset_name, 'sipn_' + opt.net + '_' +
-                                           opt.trained_epochs + '.pth')
+            opt.out_dir, opt.dataset_name, trained_model_name)
 
         if not os.path.exists(test_result_dir):
             os.makedirs(test_result_dir)
 
         net = SIPN(opt.net, opt.dataset_name, trained_model_dir,
                    is_train=False)
-        net.eval()
-        if use_cuda:
-            net.cuda()
+        net.to(device)
 
-        # load trained model
+        # Load trained model
         print('Loading model check point from {:s}'.format(trained_model_dir))
-        net.load_trained_model(torch.load(trained_model_dir))
+        checkpoint = torch.load(trained_model_dir)
+        net.load_trained_model(checkpoint['model_state_dict'])
 
-        dataset_query = PersonSearchDataset(
-            opt.data_dir, opt.dataset_name, split_name='test',
-            gallery_size=size, test_mode='query')
+        dataset_query = SIPNQueryDataset(opt.data_dir, transform)
+        query_loader = DataLoader(dataset_query, num_workers=8)
+        gallery_loader = DataLoader(dataset_gallery, num_workers=8)
 
-        g_boxes, g_features = test_gallery(net, dataset_gallery, use_cuda,
-                                            test_result_dir)
-        q_features = test_query(net, dataset_query, use_cuda, test_result_dir)
+        q_features = test_query(net, query_loader, test_result_dir)
+        g_boxes, g_features = test_gallery(
+            net, gallery_loader, test_result_dir)
 
     dataset_gallery.evaluate_detections(g_boxes, det_thresh=0.5)
     dataset_gallery.evaluate_search(g_boxes, g_features, q_features,
-                                    det_thresh=0.5, gallery_size=size,
-                                    dump_json=None)
+                                    det_thresh=0.5, gallery_size=size)
 
 
 if __name__ == '__main__':
-
     main()
