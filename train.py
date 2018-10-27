@@ -114,7 +114,8 @@ def main():
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
     save_dir = os.path.join(opt.out_dir, opt.dataset_name)
-    print('Trained models will be saved to', os.path.abspath(save_dir))
+    print('Trained models will be saved to {}\n'.format(
+        os.path.abspath(save_dir)))
     if not os.path.exists(save_dir):
         os.makedirs(save_dir)
 
@@ -147,10 +148,10 @@ def main():
     # Choose parameters to be updated during training
     lr = opt.lr
     params = []
-    print('These parameters will be updated during training:')
+    # print('These parameters will be updated during training:')
     for key, value in dict(model.named_parameters()).items():
         if value.requires_grad:
-            print(key)
+            # print(key)
             # TODO: set different decay for weight and bias
             params += [{'params': [value], 'lr': lr, 'weight_decay': 1e-4}]
 
@@ -171,9 +172,9 @@ def main():
     tensor_logger = TensorBoardLogger('./logs/TensorBoard')
 
     if opt.resume:
-        resume = os.path.join(save_dir, 'sipn_' + opt.net + '_' +
-                              str(opt.resume) + '.tar')
-        print('Resuming model check point from {}'.format(resume))
+        resume = os.path.join(save_dir, 'sipn_{}_{}.tar'.format(
+            opt.net, opt.resume))
+        print('Resuming model checkpoint from {}\n'.format(resume))
         checkpoint = torch.load(resume)
         start_epoch = checkpoint['epoch']
         model.load_trained_model(checkpoint['model_state_dict'])
