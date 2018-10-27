@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 28, 2018
-# Latest rectifying: Oct 25, 2018
+# Latest rectifying: Oct 27, 2018
 # -----------------------------------------------------
 import torch.nn as nn
 from torchvision import models
@@ -12,29 +12,26 @@ import yaml
 
 class DenseNet:
 
-    def __init__(self, num_layers=121, pre_model=None, training=True):
-        self.training = training
+    def __init__(self, num_layers=121, pre_model=None):
 
         if num_layers == 121:
             self.net_conv_channels = 512
             self.fc7_channels = 1024
-            if self.training:
-                if pre_model:
-                    self.model = models.densenet121(True).features
-                else:
-                    raise NotImplementedError('model does not match')
-            else:
+            if not pre_model:
                 self.model = models.densenet121().features
+            elif pre_model == 'official':
+                self.model = models.densenet121(True).features
+            else:
+                raise NotImplementedError('No such pre-trained model.')
         elif num_layers == 161:
             self.net_conv_channels = 1056
             self.fc7_channels = 2208
-            if self.training:
-                if pre_model:
-                    self.model = models.densenet161(True).features
-                else:
-                    raise NotImplementedError('model does not match')
-            else:
+            if not pre_model:
                 self.model = models.densenet161().features
+            elif pre_model == 'official':
+                self.model = models.densenet161(True).features
+            else:
+                raise NotImplementedError('No such pre-trained model.')
         else:
             raise KeyError(num_layers)
 

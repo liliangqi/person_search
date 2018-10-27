@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectified: Oct 25, 2018
+# Latest rectified: Oct 27, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -19,10 +19,9 @@ from utils.losses import oim_loss, smooth_l1_loss
 
 class SIPN(nn.Module):
 
-    def __init__(self, net_name, dataset_name, pre_model=None, is_train=True):
+    def __init__(self, net_name, dataset_name, pre_model=''):
         super().__init__()
         self.net_name = net_name
-        self.is_train = is_train
 
         if dataset_name == 'sysu':
             self.num_pid = 5532
@@ -41,15 +40,15 @@ class SIPN(nn.Module):
             self.queue_size, self.reid_feat_dim).cuda())
 
         if self.net_name == 'vgg16':
-            self.net = Vgg16(pre_model, self.is_train)
+            self.net = Vgg16(pre_model)
         elif self.net_name == 'res34':
-            self.net = MyResNet(34, pre_model, self.is_train)
+            self.net = MyResNet(34, pre_model)
         elif self.net_name == 'res50':
-            self.net = MyResNet(50, pre_model, self.is_train)
+            self.net = MyResNet(50, pre_model)
         elif self.net_name == 'dense121':
-            self.net = DenseNet(121, pre_model, self.is_train)
+            self.net = DenseNet(121, pre_model)
         elif self.net_name == 'dense161':
-            self.net = DenseNet(161, pre_model, self.is_train)
+            self.net = DenseNet(161, pre_model)
         else:
             raise KeyError(self.net_name)
 
@@ -57,8 +56,7 @@ class SIPN(nn.Module):
 
         # SPIN consists of three main parts
         self.head = self.net.head
-        self.strpn = STRPN(self.net.net_conv_channels, self.num_pid,
-                           self.is_train)
+        self.strpn = STRPN(self.net.net_conv_channels, self.num_pid)
         self.tail = self.net.tail
 
         self.cls_score_net = nn.Linear(self.fc7_channels, 2)
@@ -67,7 +65,7 @@ class SIPN(nn.Module):
         self.init_linear_weight(False)
 
     def forward(self, im_data, gt_boxes, im_info, mode='gallery'):
-        if self.is_train:
+        if self.training:
             net_conv = self.head(im_data)
             # returned parameters contain 3 tuples here
             pooled_feat, trans_feat, rpn_loss, label, bbox_info = self.strpn(

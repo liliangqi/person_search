@@ -3,30 +3,24 @@
 #
 # Author: Liangqi Li
 # Creating Date: May 6, 2018
-# Latest rectifying: Oct 25, 2018
+# Latest rectifying: Oct 27, 2018
 # -----------------------------------------------------
-import torch
 import torch.nn as nn
 import torchvision.models as models
 
 
 class Vgg16:
 
-    def __init__(self, pre_model=None, training=True):
+    def __init__(self, pre_model=None):
         self.net_conv_channels = 512
         self.fc7_channels = 4096
-        self.training = training
 
-        if self.training:
-            if pre_model:
-                self.model = models.vgg16()
-                state_dict = torch.load(pre_model)
-                self.model.load_state_dict({k: state_dict[k] for k in list(
-                    self.model.state_dict())})
-            else:
-                self.model = models.vgg16(True)
-        else:
+        if not pre_model:
             self.model = models.vgg16()
+        elif pre_model == 'official':
+            self.model = models.vgg16(True)
+        else:
+            raise NotImplementedError('No such pre-trained model.')
 
         self.head, self.tail = self.initialize()
 

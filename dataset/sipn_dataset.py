@@ -7,9 +7,7 @@
 # -----------------------------------------------------
 import os
 import os.path as osp
-import time
 
-import yaml
 import pandas as pd
 import cv2
 import numpy as np
@@ -29,36 +27,6 @@ def _compute_iou(a, b):
     union = (a[2] - a[0]) * (a[3] - a[1]) + \
             (b[2] - b[0]) * (b[3] - b[1]) - inter
     return inter * 1.0 / union
-
-
-def pre_process_image(im_path, flipped=False, copy=False):
-    """Pre-process the image"""
-
-    with open('config.yml', 'r') as f:
-        config = yaml.load(f)
-
-    target_size = config['target_size']
-    max_size = config['max_size']
-    pixel_means = np.array([[config['pixel_means']]])
-
-    im = cv2.imread(im_path)
-    orig_shape = im.shape
-    if flipped:
-        im = im[:, ::-1, :]
-    im = im.astype(np.float32, copy=copy)
-    im -= pixel_means
-    im_shape = im.shape
-    im_size_min = np.min(im_shape[0:2])
-    im_size_max = np.max(im_shape[0:2])
-    im_scale = float(target_size) / float(im_size_min)
-    # Prevent the biggest axis from being more than MAX_SIZE
-    if np.round(im_scale * im_size_max) > max_size:
-        im_scale = float(max_size) / float(im_size_max)
-    im = cv2.resize(im, None, None, fx=im_scale, fy=im_scale,
-                    interpolation=cv2.INTER_LINEAR)
-    im = im[np.newaxis, :]  # add batch dimension
-
-    return im, im_scale, orig_shape
 
 
 class SIPNQueryDataset(Dataset):
@@ -184,6 +152,7 @@ class SIPNDataset(Dataset):
             gt_boxes.loc[:, 'del_x'] += gt_boxes.loc[:, 'x1']
             gt_boxes.loc[:, 'del_y'] += gt_boxes.loc[:, 'y1']
             gt_boxes = gt_boxes.values
+
             if labeled_only:
                 pass  # TODO
             det = np.asarray(gallery_det[k])
@@ -199,6 +168,7 @@ class SIPNDataset(Dataset):
                 for j in range(num_det):
                     ious[i, j] = _compute_iou(gt_boxes[i], det[j, :4])
             tfmat = (ious >= iou_thresh)
+
             # for each det, keep only the largest iou of all the gt
             for j in range(num_det):
                 largest_ind = np.argmax(ious[:, j])
@@ -211,6 +181,7 @@ class SIPNDataset(Dataset):
                 for j in range(num_det):
                     if j != largest_ind:
                         tfmat[i, j] = False
+
             for j in range(num_det):
                 y_score.append(det[j, -1])
                 if tfmat[:, j].any():
@@ -228,11 +199,12 @@ class SIPNDataset(Dataset):
         # plt.plot(recall, precision)
         # plt.savefig('pr.jpg')
 
-        print('{} detection:'.format(
-            'labeled only' if labeled_only else 'all'))
-        print('  recall = {:.2%}'.format(det_rate))
+        print('Detection results:')
+        print('  Recall = {:.2%}'.format(det_rate))
         if not labeled_only:
-            print('  ap = {:.2%}'.format(ap))
+            print('  AP = {:.2%}'.format(ap))
+        print('*' * 20)
+        print()
 
     def evaluate_search(self, gallery_det, gallery_feat, probe_feat,
                         det_thresh=0.5, gallery_size=100):
@@ -264,7 +236,6 @@ class SIPNDataset(Dataset):
         aps = []
         accs = []
         topk = [1, 5, 10]
-        # ret  # TODO: save json
         for i in range(len(probe_feat)):
             pid = int(query_boxes.ix[i, 'pid'])
             assert isinstance(pid, int)
@@ -275,14 +246,9 @@ class SIPNDataset(Dataset):
             # Get L2-normalized feature vector
             feat_p = probe_feat[i].ravel()
             # Ignore the probe image
-            start = time.time()
             probe_imname = queries_to_galleries.iloc[i, 0]
-            # probe_roi = df[df['imname'] == probe_imname]
-            # probe_roi = probe_roi[probe_roi['is_query'] == 1]
-            # probe_roi = probe_roi[probe_roi['pid'] == pid]
-            # probe_roi = probe_roi.loc[:, 'x1': 'y2'].as_matrix()
             probe_gt = []
-            tested = set([probe_imname])
+            tested = {probe_imname}
             # 1. Go through the gallery samples defined by the protocol
             for g_i in range(1, gallery_size + 1):
                 gallery_imname = queries_to_galleries.iloc[i, g_i]
@@ -343,14 +309,15 @@ class SIPNDataset(Dataset):
                 y_true, y_score) * recall_rate
             aps.append(ap)
             inds = np.argsort(y_score)[::-1]
-            y_score = y_score[inds]
+            # y_score = y_score[inds]
             y_true = y_true[inds]
             accs.append([min(1, sum(y_true[:k])) for k in topk])
-            # compute time cost
-            end = time.time()
-            print('{}-th loop, cost {:.4f}s'.format(i, end - start))
 
-        print('search ranking:')
+            if (i + 1) % 100 == 0:
+                print('Evaluating the {}-th query'.format(i+1))
+
+        print()
+        print('Search ranking:')
         print('  mAP = {:.2%}'.format(np.mean(aps)))
         accs = np.mean(accs, axis=0)
         for i, k in enumerate(topk):

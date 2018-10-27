@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 1, 2018
-# Latest rectifying: Oct 25, 2018
+# Latest rectifying: Oct 27, 2018
 # -----------------------------------------------------
 import torch
 import torch.nn as nn
@@ -204,31 +204,31 @@ def resnet152(pretrained=False):
 
 class MyResNet:
 
-    def __init__(self, num_layers=50, pre_model=None, training=True):
-        self.training = training
+    def __init__(self, num_layers=50, pre_model=None):
 
         if num_layers == 34:
             self.net_conv_channels = 256
             self.fc7_channels = 512
-            if self.training:
+            if not pre_model:
+                self.model = resnet34()
+            elif pre_model == 'official':
                 self.model = resnet34(True)
             else:
-                self.model = resnet34()
+                raise NotImplementedError('No such pre-trained model.')
         elif num_layers == 50:
             self.net_conv_channels = 1024
             self.fc7_channels = 2048
-            if self.training:
-                if pre_model:
-                    self.model = resnet50()
-                    state_dict = torch.load(pre_model)
-                    self.model.load_state_dict(
-                        {k: state_dict[k] for k in list(
-                            self.model.state_dict())
-                         if 'num_batches_tracked' not in k})
-                else:
-                    self.model = resnet50(True)
+            if not pre_model:
+                self.model = resnet50()
+            elif pre_model == 'official':
+                self.model = resnet50(True)
             else:
                 self.model = resnet50()
+                state_dict = torch.load(pre_model)
+                self.model.load_state_dict(
+                    {k: state_dict[k] for k in list(
+                        self.model.state_dict())
+                     if 'num_batches_tracked' not in k})
         else:
             raise KeyError(num_layers)
 

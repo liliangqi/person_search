@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 2, 2018
-# Latest rectified: Oct 25, 2018
+# Latest rectified: Oct 27, 2018
 # -----------------------------------------------------
 import yaml
 
@@ -28,7 +28,7 @@ def spatial_transform(bottom, trans_param):
 
 class STRPN(nn.Module):
 
-    def __init__(self, net_conv_channels, num_pid, is_train=True):
+    def __init__(self, net_conv_channels, num_pid):
         """
         create Spatial Transformer Region Proposal Network
         ---
@@ -40,7 +40,6 @@ class STRPN(nn.Module):
         with open('config.yml', 'r') as f:
             self.config = yaml.load(f)
         self.num_pid = num_pid
-        self.is_train = is_train
         self.feat_stride = self.config['rpn_feat_stride']
         self.rpn_channels = self.config['rpn_channels']
         self.anchor_scales = self.config['anchor_scales']
@@ -60,7 +59,7 @@ class STRPN(nn.Module):
         self.initialize_weight(False)
 
     def forward(self, head_features, gt_boxes, im_info, mode='gallery'):
-        if self.is_train:
+        if self.training:
             rois, rpn_info, label, bbox_info, roi_trans_param = \
                 self.region_proposal(head_features, gt_boxes, im_info)
             rpn_label, rpn_bbox_info, rpn_cls_score, rpn_bbox_pred = rpn_info
@@ -186,7 +185,7 @@ class STRPN(nn.Module):
         rpn_trans_param = rpn_trans_param.permute(
             0, 2, 3, 1).contiguous()
 
-        if self.is_train:
+        if self.training:
             rois, roi_scores, roi_trans_param = self.proposal_layer(
                 rpn_cls_prob, rpn_bbox_pred, rpn_trans_param, im_info)
             rpn_labels, rpn_bbox_info = self.anchor_target_layer(
@@ -206,7 +205,7 @@ class STRPN(nn.Module):
 
     def proposal_layer(self, rpn_cls_prob, rpn_bbox_pred, rpn_trans_param,
                        im_info):
-        if self.is_train:
+        if self.training:
             pre_nms_top_n = self.config['train_rpn_pre_nms_top_n']
             post_nms_top_n = self.config['train_rpn_post_nms_top_n']
             nms_thresh = self.config['train_rpn_nms_thresh']
