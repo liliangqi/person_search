@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Apr 10, 2018
-# Latest rectified: Aug 8, 2018
+# Latest rectified: Oct 27, 2018
 # -----------------------------------------------------
 import os
 import time
@@ -20,7 +20,7 @@ import dataset.sipn_transforms as sipn_transforms
 from models.model import SIPN
 from utils.bbox_transform import bbox_transform_inv
 from nms.pth_nms import pth_nms as nms
-from utils.utils import clock_non_return, clip_boxes
+from utils.utils import clock_non_return, clip_boxes, AverageMeter
 
 
 def parse_args():
@@ -48,10 +48,11 @@ def test_gallery(net, dataloader, output_dir, thresh=0.):
         config = yaml.load(f)
 
     num_images = len(dataloader.dataset)
-    all_boxes = [0 for _ in range(num_images)]
-    all_features = [0 for _ in range(num_images)]
+    all_boxes = []
+    all_features = []
+    end = time.time()
+    time_cost = AverageMeter()
     net.eval()
-    start = time.time()
 
     for i, data in enumerate(dataloader):
         with torch.no_grad():
@@ -87,12 +88,13 @@ def test_gallery(net, dataloader, output_dir, thresh=0.):
         keep = nms(torch.from_numpy(cls_dets),
                    config['test_nms']).numpy() if cls_dets.size > 0 else []
         cls_dets = cls_dets[keep, :]
-        all_boxes[i] = cls_dets
-        all_features[i] = features[inds][keep]
+        all_boxes.append(cls_dets)
+        all_features.append(features[inds][keep])
 
+        time_cost.update(time.time() - end)
         end = time.time()
         print('im_detect: {:d}/{:d} {:.3f}s'.format(
-            i + 1, num_images, (end - start) / (i + 1)))
+            i + 1, num_images, time_cost.avg))
 
     det_file = os.path.join(output_dir, 'gboxes.pkl')
     with open(det_file, 'wb') as f:
@@ -109,24 +111,24 @@ def test_query(net, dataloader, output_dir):
     """Test query images"""
 
     num_images = len(dataloader.dataset)
-    all_features = [0 for _ in range(num_images)]
-    start = time.time()
+    all_features = []
+    end = time.time()
+    time_cost = AverageMeter()
     net.eval()
 
     for i, data in enumerate(dataloader):
         im, (roi, im_info) = data
-        roi = roi.numpy()
-        roi = np.hstack(([[0]], roi.reshape(1, 4)))
         im = im.to(device)
-        roi = torch.from_numpy(roi).float().to(device)
+        roi = torch.cat((torch.zeros(1, 1), roi), 1).to(device)
 
         with torch.no_grad():
             features = net.forward(im, roi, im_info, 'query')
-        all_features[i] = features[0]  # TODO: check this
+        all_features.append(features[0])  # TODO: check this
 
+        time_cost.update(time.time() - end)
         end = time.time()
         print('query_exfeat: {:d}/{:d} {:.3f}s'.format(
-            i + 1, num_images, (end - start) / (i + 1)))
+            i + 1, num_images, time_cost.avg))
 
     feature_file = os.path.join(output_dir, 'qfeatures.pkl')
     with open(feature_file, 'wb') as f:
@@ -162,39 +164,35 @@ def main():
         opt.data_dir, opt.dataset_name, 'test', transform)
 
     if opt.use_saved_result:
-        gboxes_file = open(os.path.join(test_result_dir, 'gboxes.pkl'), 'rb')
-        g_boxes = pickle.load(gboxes_file)
-        gfeatures_file = open(os.path.join(test_result_dir,
-                                           'gfeatures.pkl'), 'rb')
-        g_features = pickle.load(gfeatures_file)
-        qfeatures_file = open(os.path.join(test_result_dir, 'qfeatures.pkl'),
-                              'rb')
-        q_features = pickle.load(qfeatures_file)
+        with open(os.path.join(test_result_dir, 'gboxes.pkl'), 'rb') as f:
+            g_boxes = pickle.load(f)
+        with open(os.path.join(test_result_dir, 'gfeatures.pkl'), 'rb') as f:
+            g_features = pickle.load(f)
+        with open(os.path.join(test_result_dir, 'qfeatures.pkl'), 'rb') as f:
+            q_features = pickle.load(f)
 
     else:
         global device
         device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-        trained_model_name = 'sipn_' + opt.net + '_' + opt.epochs + '.tar'
-        trained_model_dir = os.path.join(
-            opt.out_dir, opt.dataset_name, trained_model_name)
-
-        if not os.path.exists(test_result_dir):
-            os.makedirs(test_result_dir)
-
-        net = SIPN(opt.net, opt.dataset_name, trained_model_dir,
-                   is_train=False)
+        net = SIPN(opt.net, opt.dataset_name)
         net.to(device)
 
         # Load trained model
+        trained_model_name = 'sipn_{}_{}.tar'.format(opt.net, opt.epochs)
+        trained_model_dir = os.path.join(
+            opt.out_dir, opt.dataset_name, trained_model_name)
         print('Loading model check point from {:s}'.format(trained_model_dir))
         checkpoint = torch.load(trained_model_dir)
         net.load_trained_model(checkpoint['model_state_dict'])
 
+        # Define datasets
         dataset_query = SIPNQueryDataset(opt.data_dir, transform)
         query_loader = DataLoader(dataset_query, num_workers=8)
         gallery_loader = DataLoader(dataset_gallery, num_workers=8)
 
+        if not os.path.exists(test_result_dir):
+            os.makedirs(test_result_dir)
         q_features = test_query(net, query_loader, test_result_dir)
         g_boxes, g_features = test_gallery(
             net, gallery_loader, test_result_dir)
