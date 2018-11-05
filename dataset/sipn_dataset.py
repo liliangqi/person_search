@@ -3,18 +3,21 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 28, 2018
-# Latest rectified: Oct 26, 2018
+# Latest rectified: Nov 5, 2018
 # -----------------------------------------------------
 import os
 import os.path as osp
+import random
+from itertools import permutations
 
 import pandas as pd
 import cv2
 import numpy as np
+import pickle
 import torch
 from torch.utils.data import Dataset
+from torch.utils.data.sampler import Sampler
 from sklearn.metrics import average_precision_score, precision_recall_curve
-import dataset.sipn_transforms as sipn_transforms
 # import matplotlib.pyplot as plt
 
 
@@ -27,6 +30,16 @@ def _compute_iou(a, b):
     union = (a[2] - a[0]) * (a[3] - a[1]) + \
             (b[2] - b[0]) * (b[3] - b[1]) - inter
     return inter * 1.0 / union
+
+
+def sipn_fn(batch):
+
+    assert len(batch[0]) == 3 or len(batch[0]) == 4
+    im_tensors = torch.stack([x[0] for x in batch])
+    gt_boxes = torch.stack([x[1] for x in batch])
+    im_info = np.vstack([x[2] for x in batch])
+
+    return im_tensors, gt_boxes, im_info
 
 
 class SIPNQueryDataset(Dataset):
@@ -90,6 +103,11 @@ class SIPNDataset(Dataset):
         self.imnames = pd.read_csv(os.path.join(
                 self.anno_dir, self.imnames_file), header=None, squeeze=True)
 
+        # Count all the pids except for -1
+        self.pids = list(set(self.all_boxes['pid']) - {-1})
+        random.shuffle(self.pids)
+
+        # TODO: remove the below lines
         if self.dataset_name == 'sysu':
             self.gallery_sizes = [50, 100, 500, 1000, 2000, 4000]
             self.num_pid = 5532
@@ -131,7 +149,7 @@ class SIPNDataset(Dataset):
         boxes = torch.Tensor(boxes).float()
 
         if self.split == 'train':
-            return im, (boxes, im_info)
+            return im, boxes, im_info, im_name
         elif self.split == 'test':
             return im, (orig_shape, im_info)
         else:
@@ -324,15 +342,113 @@ class SIPNDataset(Dataset):
             print('  top-{:2d} = {:.2%}'.format(k, accs[i]))
 
 
+class PersonSearchTripletSampler(Sampler):
+
+    def __init__(self, dataset):
+        super().__init__(dataset)
+        self.dataset = dataset
+        all_boxes_df = dataset.all_boxes
+        all_imnames = dataset.imnames
+        all_pids = dataset.pids
+
+        print('Sampling the identities to triplets...')
+        iter_inds_path = os.path.join(dataset.anno_dir, 'tri_iter_inds.pkl')
+        batch_pids_path = os.path.join(dataset.anno_dir, 'tri_batch_pids.pkl')
+        if os.path.exists(iter_inds_path) and os.path.exists(batch_pids_path):
+            with open(iter_inds_path, 'rb') as f:
+                self.iter_inds = pickle.load(f)
+            with open(batch_pids_path, 'rb') as f:
+                self.batch_pids = pickle.load(f)
+
+        else:
+            self.iter_inds = []
+            self.batch_pids = []
+
+            # For each pid, select an anchor image and a positive image
+            for i, pid in enumerate(all_pids):
+                if (i+1) % 100 == 0:
+                    print('Processing identity {}/{}'.format(
+                        i+1, len(all_pids)))
+                cur_pid_df = all_boxes_df.query('pid==@pid')
+                pos_imnames = list(set(cur_pid_df['imname']))
+                assert len(pos_imnames) >= 2
+                # Select negative images from images that don't contain the pid
+                neg_imnames = list(set(all_imnames) - set(pos_imnames))
+
+                # Get An2 permutations for the anchor and the positive
+                for q_name, p_name in permutations(pos_imnames, 2):
+                    names = [q_name, p_name, random.choice(neg_imnames)]
+                    # Get the index of the very image in dataset.imnames
+                    ids = [all_imnames[all_imnames == name].index.tolist()[0]
+                           for name in names]
+                    self.iter_inds.append(ids)
+                    self.batch_pids.append(pid)
+
+            with open(iter_inds_path, 'wb') as f:
+                pickle.dump(self.iter_inds, f, pickle.HIGHEST_PROTOCOL)
+            with open(batch_pids_path, 'wb') as f:
+                pickle.dump(self.batch_pids, f, pickle.HIGHEST_PROTOCOL)
+
+        print('Done.\n')
+
+    def __iter__(self):
+        for inds in self.iter_inds:
+            yield inds
+
+    def __len__(self):
+        return len(self.dataset)
+
+
+class PersonSearchTripletFn:
+
+    def __init__(self, dataset, batch_pids):
+        self.dataset = dataset
+        self.batch_pids = batch_pids
+        self.called_times = 0
+
+    def __call__(self, batch):
+        assert len(batch) == 3
+        assert len(batch[0]) == 4
+        # Transfer tuple to list to change its value then
+        for i in range(3):
+            batch[i] = [x for x in batch[i]]
+
+        # Pick out the DataFrame of the current image and current identity
+        pid = self.batch_pids[self.called_times]
+        q_name = batch[0][-1]
+        assert isinstance(q_name, str)
+        q_boxes = self.dataset.all_boxes.query('imname==@q_name')
+        q_box = self.dataset.all_boxes.query('imname==@q_name and pid==@pid')
+        assert q_box.shape[0] == 1
+
+        # Get the index where the identity appears in the current image
+        q_boxes = q_boxes.loc[:, 'x1': 'del_y'].values
+        q_box = q_box.loc[:, 'x1': 'del_y'].values.ravel()
+        idx = np.all(q_boxes == q_box, axis=1).nonzero()
+        assert len(idx) == 1
+
+        # Change the boxes of the image to the box of the current identity
+        idx = idx[0].item()
+        self.called_times += 1
+        batch[0][1] = batch[0][1][idx].unsqueeze(0)
+        assert int(batch[0][1][0, -1].item()) == pid
+
+        im_tensors = tuple([x[0].unsqueeze(0) for x in batch])
+        gt_boxes = tuple([x[1] for x in batch])
+        im_info = tuple([x[2] for x in batch])
+
+        return im_tensors, gt_boxes, im_info
+
+
 if __name__ == '__main__':
 
-    rtdir = '/home/liliangqi/hdd/datasets/cuhk_sysu'
-
-    cur_transform = sipn_transforms.Compose([
-        sipn_transforms.Scale(600, 1000),
-        sipn_transforms.ToTensor(),
-        sipn_transforms.Normalize([102.9801, 115.9465, 122.7717])
-    ])
-    gallery_dataset = SIPNDataset(rtdir, 'sysu', 'test', cur_transform)
+    # rtdir = '/home/liliangqi/hdd/datasets/cuhk_sysu'
+    #
+    # cur_transform = sipn_transforms.Compose([
+    #     sipn_transforms.Scale(600, 1000),
+    #     sipn_transforms.ToTensor(),
+    #     sipn_transforms.Normalize([102.9801, 115.9465, 122.7717])
+    # ])
+    # gallery_dataset = SIPNDataset(rtdir, 'sysu', 'test', cur_transform)
 
     print('Debug')
