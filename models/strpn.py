@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li and Xinlei Chen
 # Creating Date: Apr 2, 2018
-# Latest rectified: Oct 27, 2018
+# Latest rectified: Nov 5, 2018
 # -----------------------------------------------------
 import yaml
 
@@ -60,31 +60,43 @@ class STRPN(nn.Module):
 
     def forward(self, head_features, gt_boxes, im_info, mode='gallery'):
         if self.training:
-            rois, rpn_info, label, bbox_info, roi_trans_param = \
-                self.region_proposal(head_features, gt_boxes, im_info)
-            rpn_label, rpn_bbox_info, rpn_cls_score, rpn_bbox_pred = rpn_info
+            if mode == 'gallery':
+                rois, rpn_info, label, bbox_info, roi_trans_param = \
+                    self.region_proposal(head_features, gt_boxes, im_info)
+                rpn_label, rpn_bbox_info, rpn_cls_score, rpn_bbox_pred = \
+                    rpn_info
 
-            rpn_cls_score = rpn_cls_score.view(-1, 2)
-            rpn_label = rpn_label.view(-1)
-            rpn_select = (rpn_label.data != -1).nonzero().view(-1)
-            rpn_cls_score = rpn_cls_score.index_select(
-                0, rpn_select).contiguous().view(-1, 2)
-            rpn_label = rpn_label.index_select(
-                0, rpn_select).contiguous().view(-1)
+                rpn_cls_score = rpn_cls_score.view(-1, 2)
+                rpn_label = rpn_label.view(-1)
+                rpn_select = (rpn_label.data != -1).nonzero().view(-1)
+                rpn_cls_score = rpn_cls_score.index_select(
+                    0, rpn_select).contiguous().view(-1, 2)
+                rpn_label = rpn_label.index_select(
+                    0, rpn_select).contiguous().view(-1)
 
-            rpn_cls_loss = func.cross_entropy(rpn_cls_score, rpn_label)
-            rpn_box_loss = smooth_l1_loss(rpn_bbox_pred, rpn_bbox_info,
-                                          sigma=3.0, dim=[1, 2, 3])
-            rpn_loss = (rpn_cls_loss, rpn_box_loss)
+                rpn_cls_loss = func.cross_entropy(rpn_cls_score, rpn_label)
+                rpn_box_loss = smooth_l1_loss(rpn_bbox_pred, rpn_bbox_info,
+                                              sigma=3.0, dim=[1, 2, 3])
+                rpn_loss = (rpn_cls_loss, rpn_box_loss)
 
-            # Roi-pooling (unable to work now)
-            # pooled_feat = self.roi_pool(head_features, rois)
+                # Roi-pooling (unable to work now)
+                # pooled_feat = self.roi_pool(head_features, rois)
 
-            # Crop and resize
-            pooled_feat = self.pooling(head_features, rois, max_pool=False)
-            transformed_feat = spatial_transform(pooled_feat, roi_trans_param)
+                # Crop and resize
+                pooled_feat = self.pooling(
+                    head_features, rois, max_pool=False)
+                transformed_feat = spatial_transform(
+                    pooled_feat, roi_trans_param)
 
-            return pooled_feat, transformed_feat, rpn_loss, label, bbox_info
+                return pooled_feat, transformed_feat, rpn_loss, label,\
+                    bbox_info
+
+            elif mode == 'query':
+                pooled_feat = self.pooling(head_features, gt_boxes, False)
+                return pooled_feat
+
+            else:
+                raise KeyError(mode)
 
         else:
             if mode == 'gallery':
