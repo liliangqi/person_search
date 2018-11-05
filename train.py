@@ -3,7 +3,7 @@
 #
 # Author: Liangqi Li
 # Creating Date: Mar 31, 2018
-# Latest rectified: Oct 25, 2018
+# Latest rectified: Nov 5, 2018
 # -----------------------------------------------------
 import os
 import time
@@ -16,7 +16,8 @@ from torch.optim import lr_scheduler
 
 from utils.utils import clock_non_return, AverageMeter
 from utils.logger import TensorBoardLogger
-from dataset.sipn_dataset import SIPNDataset
+from dataset.sipn_dataset import SIPNDataset, sipn_fn, \
+    PersonSearchTripletSampler, PersonSearchTripletFn
 import dataset.sipn_transforms as sipn_transforms
 from models.model import SIPN
 
@@ -51,10 +52,17 @@ def train_model(dataloader, net, optimizer, epoch):
         config = yaml.load(f)
 
     for iter_idx, data in enumerate(dataloader):
-        im, (gt_boxes, im_info) = data
-        im = im.to(device)
-        gt_boxes = gt_boxes.squeeze(0).to(device)
-        im_info = im_info.numpy().squeeze(0)
+        im, gt_boxes, im_info = data
+
+        if isinstance(im, tuple):
+            assert isinstance(gt_boxes, tuple)
+            assert isinstance(im_info, tuple)
+            im = tuple([x.to(device) for x in im])
+            gt_boxes = tuple([x.to(device) for x in gt_boxes])
+        else:
+            im = im.to(device)
+            gt_boxes = gt_boxes.squeeze(0).to(device)
+            im_info = im_info.ravel()
 
         # Forward and backward
         losses = net(im, gt_boxes, im_info)
@@ -112,6 +120,8 @@ def main():
     opt = parse_args()
     global device
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
+    torch.backends.cudnn.benchmark = True
+    torch.manual_seed(1024)
 
     save_dir = os.path.join(opt.out_dir, opt.dataset_name)
     print('Trained models will be saved to {}\n'.format(
@@ -143,7 +153,10 @@ def main():
 
     # Load the dataset
     dataset = SIPNDataset(opt.data_dir, opt.dataset_name, 'train', transform)
-    dataloader = DataLoader(dataset, shuffle=True, num_workers=8)
+    sampler = PersonSearchTripletSampler(dataset)
+    collate_fn = PersonSearchTripletFn(dataset, sampler.batch_pids)
+    dataloader = DataLoader(
+        dataset, batch_sampler=sampler, collate_fn=collate_fn)
 
     # Choose parameters to be updated during training
     lr = opt.lr
@@ -190,6 +203,7 @@ def main():
 
         train_model(dataloader, model, optimizer, epoch)
         scheduler.step()
+        collate_fn.called_times = 0
 
         epoch_end = time.time()
         print('\nEntire epoch time cost: {:.2f} hours\n'.format(
