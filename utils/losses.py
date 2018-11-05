@@ -3,10 +3,11 @@
 #
 # Author: Liangqi Li and Tong Xiao
 # Creating Date: Jan 3, 2018
-# Latest rectifying: Oct 25, 2018
+# Latest rectifying: Nov 5, 2018
 # -----------------------------------------------------
 import torch
-from torch.autograd import Function, Variable
+import torch.nn as nn
+from torch.autograd import Function
 import torch.nn.functional as func
 import numpy as np
 
@@ -28,6 +29,67 @@ def smooth_l1_loss(bbox_pred, bbox_info, sigma=1., dim=(1,)):
         loss_box = loss_box.sum(i)
     loss_box = loss_box.mean()
     return loss_box
+
+
+def euclidean_distance(x, y):
+    """
+    Compute Euclidean distance between two Variable matrices.
+    ---
+    param:
+        x: PyTorch Variable with shape (m, d)
+        y: PyTorch Variable with shape (n, d)
+    return:
+        distance: PyTorch Variable with shape (m, n)
+    """
+    m, n = x.size(0), y.size(0)
+    xx = torch.pow(x, 2).sum(1, keepdim=True).expand(m, n)
+    yy = torch.pow(y, 2).sum(1, keepdim=True).expand(n, m).t()
+    distance = xx + yy
+    distance.addmm_(1, -2, x, y.t())
+    distance = distance.clamp(min=1e-12).sqrt()
+
+    return distance
+
+
+class TripletLoss:
+
+    def __init__(self, margin=0.3):
+        self.ranking_loss = nn.MarginRankingLoss(margin=margin)
+
+    def __call__(self, q_feature, q_label, g_features, g_labels, mode='hard'):
+        """
+        Compute triplet loss between query and galleries using query as anchor.
+        ---
+        param:
+            q_feature: PyTorch Variable refers to query feature in shape (1, D)
+            g_features: PyTorch Variable refers to gallery features with shape
+                        (N, D), where N is the number of persons in the gallery
+            q_label: (int) the label of the query
+            g_label: PyTorch Variable refers to labels gallery rois
+            mode: (str) hard mining or average
+        """
+        assert q_label in g_labels.data, \
+            '{:d} does not exist in gallery rois'.format(q_label)
+
+        distance = euclidean_distance(q_feature, g_features).squeeze(0)
+        # distance = -cosine_similarity(q_feature, g_features)
+        is_pos = g_labels == q_label
+        is_neg = g_labels != q_label
+
+        if mode == 'hard':
+            dist_ap = torch.max(distance[is_pos]).unsqueeze(0)
+            dist_an = torch.min(distance[is_neg]).unsqueeze(0)
+            loss = self.ranking_loss(dist_an, dist_ap, torch.ones(1).cuda())
+            return loss
+
+        elif mode == 'average':
+            dist_ap = torch.mean(distance[is_pos]).unsqueeze(0)
+            dist_an = torch.mean(distance[is_neg]).unsqueeze(0)
+            loss = self.ranking_loss(dist_an, dist_ap, torch.ones(1).cuda())
+            return loss
+
+        else:
+            raise KeyError(mode)
 
 
 class OIM(Function):
@@ -72,7 +134,7 @@ def oim_loss(reid_feat, aux_label, lut, queue, num_gt, momentum=0.5):
     aux_label_np = aux_label.data.cpu().numpy()
     invalid_inds = np.where((aux_label_np < 0) | (aux_label_np >= num_pid))
     aux_label_np[invalid_inds] = -1
-    pid_label = Variable(torch.from_numpy(aux_label_np).long().cuda()).view(-1)
+    pid_label = torch.from_numpy(aux_label_np).long().cuda().view(-1)
     aux_label = aux_label.view(-1)
 
     reid_result = OIM(lut, queue, num_gt, momentum)(reid_feat, aux_label)
