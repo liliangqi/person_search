@@ -18,7 +18,6 @@ import torch
 from torch.utils.data import Dataset
 from torch.utils.data.sampler import Sampler
 from sklearn.metrics import average_precision_score, precision_recall_curve
-# import matplotlib.pyplot as plt
 
 
 def _compute_iou(a, b):
@@ -432,6 +431,16 @@ class PersonSearchTripletFn:
         self.called_times += 1
         batch[0][1] = batch[0][1][idx].unsqueeze(0)
         assert int(batch[0][1][0, -1].item()) == pid
+
+        # Crop the query image to a query person
+        q_box = batch[0][1][0].numpy()[:4].astype(np.int32).tolist()
+        x1, y1, x2, y2 = q_box
+        assert y2 <= batch[0][0].size(1) and x2 <= batch[0][0].size(2), \
+            '{} with size ({}, {}) conflicts with box {}'.format(
+                q_name, batch[0][0].size(2), batch[0][0].size(1), q_box)
+        assert x1 < x2 and y1 < y2, '{} has conflict box {}'.format(
+            q_name, q_box)
+        batch[0][0] = batch[0][0][:, y1: y2, x1: x2]
 
         im_tensors = tuple([x[0].unsqueeze(0) for x in batch])
         gt_boxes = tuple([x[1] for x in batch])
