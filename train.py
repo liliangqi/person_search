@@ -83,7 +83,6 @@ def train_model(dataloader, net, optimizer, epoch, criterion):
             pid = int(q_box[:, -1].item())
 
             data_time.update(time.time() - data_time_end)
-            data_time_end = time.time()
             train_time_end = time.time()
 
             q_feat = net(q_im, q_box, q_info, mode='query')
@@ -120,7 +119,6 @@ def train_model(dataloader, net, optimizer, epoch, criterion):
             im_info = im_info.ravel()
 
             data_time.update(time.time() - data_time_end)
-            data_time_end = time.time()
             train_time_end = time.time()
 
             det_loss, feat, label = net(im, gt_boxes, im_info)
@@ -179,6 +177,7 @@ def train_model(dataloader, net, optimizer, epoch, criterion):
 
         torch.cuda.empty_cache()
         total_time.update(time.time() - total_time_end)
+        data_time_end = time.time()
         total_time_end = time.time()
 
 
